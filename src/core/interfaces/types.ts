@@ -1,0 +1,165 @@
+// HeaderJson schema
+export interface HeaderJson {
+  file: string;
+  lang: string;
+  checksum: string;
+  classes: ClassInfo[];
+  methods: MethodInfo[];
+  imports: string[];
+  exports: string[];
+}
+
+export interface ClassInfo {
+  id: string;
+  name: string;
+  loc: string; // "80-150"
+  extends?: string;
+  implements?: string[];
+  insight?: string;
+}
+
+export interface MethodInfo {
+  id: string;
+  name: string;
+  class?: string;
+  loc: string;
+  sig: string;
+  refs: string[];
+  decorators?: string[];
+  insight?: string;
+}
+
+export interface VectorRecord {
+  id: string;
+  vector: number[];
+  type: 'method' | 'class' | 'memory';
+  file: string;
+  method?: string;
+  class?: string;
+  loc?: string;
+  sig?: string;
+  refs?: string[];
+  insight?: string;
+  lang?: string;
+  text?: string; // for memory type
+}
+
+export interface SearchResult {
+  type: 'method' | 'class' | 'memory';
+  id?: string;
+  file?: string;
+  method?: string;
+  class?: string;
+  loc?: string;
+  sig?: string;
+  refs?: string[];
+  insight?: string;
+  text?: string;
+  score?: number;
+}
+
+export interface SmartSearchCandidate {
+  id: string;
+  type: 'method' | 'class' | 'memory';
+  file?: string;
+  method?: string;
+  class?: string;
+  loc?: string;
+  sig?: string;
+  refs?: string[];
+  insight?: string;
+  text?: string;
+  score?: number;
+}
+
+export interface ProjectConfig {
+  version: number;
+  languages: string[];
+  include: string[];
+  exclude: string[];
+  aiInsight: boolean;
+  aiInsightConcurrency: number;
+  watch: { debounceMs: number };
+  search: {
+    defaultLimit: number;
+    maxLimit: number;
+    smartSearchEnabled?: boolean;
+    smartSearchCandidateMultiplier?: number;
+  };
+  dependencyDepth: number;
+}
+
+export interface UserConfig {
+  llm: LLMConfig;
+  embedding: EmbeddingConfig;
+}
+
+export interface LLMConfig {
+  provider: string; // 'ollama' | 'openai' | 'anthropic' | 'none'
+  endpoint?: string;
+  apiKey?: string;
+  model: string;
+}
+
+export interface EmbeddingConfig {
+  provider: string; // 'ollama' | 'openai' | 'none'
+  endpoint?: string;
+  apiKey?: string;
+  model: string;
+}
+
+export interface MemoryRecord {
+  id: string;
+  text: string;
+  createdAt: string;
+  ref?: string;
+}
+
+export interface ScanProgress {
+  phase: 'structure' | 'insight' | 'vectors';
+  totalFiles: number;
+  processedFiles: number;
+  totalMethods: number;
+  currentFile?: string;
+  skipped?: boolean;
+  insightResult?: InsightGenerationResult;
+}
+
+export type SyncStep = 'checksum' | 'parsing' | 'insight' | 'vectors' | 'done';
+
+export interface SyncResult {
+  file: string;
+  action: 'deleted' | 'unchanged' | 'parsed' | 'indexed';
+  methodsUpdated: number;
+  methodsAdded: number;
+  methodsRemoved: number;
+}
+
+export type ParsedClassInfo = Omit<ClassInfo, 'id'>;
+export type ParsedMethodInfo = Omit<MethodInfo, 'id'>;
+
+export interface ParsedFile {
+  file: string;
+  lang: string;
+  classes: ParsedClassInfo[];
+  methods: ParsedMethodInfo[];
+  imports: string[];
+  exports: string[];
+}
+
+export interface InsightQueueItem {
+  file: string;
+  methodId: string;
+  methodName: string;
+  methodCode: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  retries: number;
+  queuedAt: string;
+}
+
+export interface InsightGenerationResult {
+  file: string;
+  sentCount: number;
+  methods: { id: string; name: string; insight: string }[];
+  error?: string;
+}

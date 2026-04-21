@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NanoContext Benchmark UI</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <aside class="sidebar">
+      <div class="sidebar-card hero">
+        <p class="eyebrow">NanoContext</p>
+        <h1>Benchmark Results</h1>
+        <p class="muted">Select the local <code>benchmark/runs</code> folder and inspect both aggregate trends and single-run details.</p>
+        <button id="pick-folder-button" class="primary-button">Select Runs Folder</button>
+        <p id="folder-status" class="tiny muted">No folder selected.</p>
+      </div>
+
+      <div class="sidebar-card">
+        <label for="run-filter">Run Filter</label>
+        <input id="run-filter" type="search" placeholder="Search run id / task / repo">
+      </div>
+
+      <div class="sidebar-card">
+        <div class="section-title">Runs</div>
+        <div id="run-list" class="run-list"></div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Overview</p>
+            <h2>Aggregate Analytics</h2>
+          </div>
+          <div id="aggregate-badges" class="badge-row"></div>
+        </div>
+        <div id="aggregate-empty" class="empty-state">Select a runs folder to load analytics.</div>
+        <div id="aggregate-content" class="hidden">
+          <div id="aggregate-cards" class="card-grid"></div>
+          <div class="table-panel">
+            <h3>Per Task Analytics</h3>
+            <div class="table-wrap">
+              <table id="aggregate-table">
+                <thead>
+                  <tr>
+                    <th>Task</th>
+                    <th>Runs</th>
+                    <th>NC Token Savings</th>
+                    <th>NC Non-Cached Savings</th>
+                    <th>SmartSearch Token Savings</th>
+                    <th>SmartSearch Non-Cached Savings</th>
+                    <th>Smart vs NC Gain</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Drill Down</p>
+            <h2 id="selected-run-title">Single Run Details</h2>
+          </div>
+          <div id="selected-run-meta" class="badge-row"></div>
+        </div>
+        <div id="selected-run-empty" class="empty-state">Pick a run from the left to inspect its metrics, logs, and raw outputs.</div>
+        <div id="selected-run-content" class="hidden">
+          <div id="selected-run-cards" class="card-grid"></div>
+          <div id="selected-run-conditions" class="condition-grid"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="condition-template">
+    <article class="condition-panel">
+      <div class="condition-header">
+        <div>
+          <p class="eyebrow condition-eyebrow"></p>
+          <h3 class="condition-title"></h3>
+        </div>
+        <div class="badge-row condition-badges"></div>
+      </div>
+      <div class="condition-metrics"></div>
+      <div class="subsection">
+        <h4>Final Answer</h4>
+        <pre class="log-block final-answer"></pre>
+      </div>
+      <div class="subsection">
+        <h4>Executed Commands</h4>
+        <div class="command-list"></div>
+      </div>
+      <div class="subsection">
+        <h4>Console Messages</h4>
+        <div class="message-list"></div>
+      </div>
+      <div class="subsection">
+        <h4>Logs</h4>
+        <div class="log-list"></div>
+      </div>
+    </article>
+  </template>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

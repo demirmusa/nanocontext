@@ -1,0 +1,106 @@
+NanoContext Custom License 1.4
+Copyright (c) 2026 Musa Demir
+
+This is a source-available license. It allows broad use, modification, and free redistribution of NanoContext, but it does not permit commercial distribution of NanoContext itself or certain competing derivatives without prior written permission. Because of these restrictions, it is not an OSI-approved open-source license.
+
+1. Definitions
+
+"Software" means the NanoContext source code, binaries, and official distributions made available by the Licensor under this repository.
+
+"Licensor" means Musa Demir.
+
+"Internal Use" means use within your own company or organization for your own operations, where you are not selling, licensing, or providing the Software itself to third parties as a product or hosted service.
+
+"Commercially Distribute" means to sell, license for a fee, or provide to third parties as a paid product, paid hosted service, or paid SaaS where the Software or a derivative work is a substantial part of the offering.
+
+2. Purpose
+
+The purpose of this license is to allow broad free use of NanoContext by everyone, while preventing anyone from taking NanoContext itself, or a substantially similar derivative of it, and selling it as their own product without permission.
+
+3. Free Use
+
+Subject to this license, everyone may use the Software for free.
+
+This includes, without limitation, the right to:
+
+- use, run, copy, download, and execute the Software;
+- study and inspect the source code;
+- modify the Software;
+- fork the Software;
+- create derivative works;
+- publish forks or modified versions;
+- publish forks or modified versions in source-available form;
+- use the Software personally;
+- use the Software inside a company or organization;
+- use the Software for research, education, experimentation, or evaluation;
+- use the Software in internal tools and internal workflows;
+- use the Software to help build, test, maintain, deploy, support, or improve another product;
+- use the Software while developing commercial software or services;
+- distribute the Software or modified versions for free.
+
+4. What Is Also Allowed
+
+The following are explicitly allowed under this license:
+
+- using NanoContext as a tool while building a paid application;
+- using NanoContext as an internal dependency or internal developer tool;
+- using NanoContext in a commercial company for Internal Use;
+- forking NanoContext and modifying it for private or Internal Use;
+- forking NanoContext and releasing the fork publicly for free;
+- forking NanoContext and releasing the fork publicly in source-available form for free.
+
+5. Activities That Require Separate Commercial Permission
+
+You may not, without prior written permission from the Licensor, Commercially Distribute:
+
+- the Software itself;
+- the Software itself as a paid hosted service or paid SaaS;
+- a fork of the Software;
+- a modified version of the Software;
+- a renamed version of the Software;
+- a derivative work based substantially on the Software;
+- any product whose core purpose, core workflow, or substantial functionality is the same as or derived from the Software.
+
+For clarity, Internal Use is allowed, including inside a commercial company, so long as you are not Commercially Distributing the Software or a prohibited derivative to third parties.
+
+6. Rebranding Does Not Create Commercial Rights
+
+This license does not allow anyone to take NanoContext, rename it, make minor, moderate, or substantial changes, add new features, and then sell the result as a separate product without permission.
+
+Adding features, changing branding, changing APIs, changing the user interface, changing the file structure, or combining the Software with other code does not by itself create permission to Commercially Distribute the result.
+
+If the resulting product is substantially based on NanoContext or provides substantially the same primary product value as NanoContext, it may not be Commercially Distributed under this free license.
+
+7. Attribution
+
+If you distribute the Software or any derivative work, whether modified or unmodified, you must:
+
+- retain this license text;
+- retain all copyright notices;
+- state that the original project is NanoContext by Musa Demir;
+- clearly identify any modifications you made.
+
+8. No Trademark Rights
+
+This license does not grant any right to use the name "NanoContext", or the name, brand, or logo of the Licensor, for branding, endorsement, or marketing without prior written permission.
+
+9. Ownership
+
+The Software is licensed, not sold.
+All rights not expressly granted under this license are reserved by the Licensor.
+
+10. Termination
+
+If you violate any term of this license, your rights under this license terminate automatically.
+
+11. No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+12. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE LICENSOR SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM OR RELATED TO THE SOFTWARE OR THIS LICENSE.
+
+13. Commercial Licensing Contact
+
+For permission to sell NanoContext or a product substantially based on NanoContext, contact Musa Demir using the contact information published on the project owner's GitHub profile or repository.

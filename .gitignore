@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.nanocontext/
+*.tsbuildinfo
+.env
+.env.*
+*.log
+coverage/
+.nyc_output/
+.DS_Store
+Thumbs.db
+.claude/
+/benchmark/repos

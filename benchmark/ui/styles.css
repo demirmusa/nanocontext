@@ -26,29 +26,63 @@ body {
 }
 
 .page-shell {
-  display: grid;
-  grid-template-columns: 360px 1fr;
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   gap: 24px;
   padding: 24px;
+  width: 100%;
 }
 
-.sidebar, .content {
+.topbar,
+.content {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  min-width: 0;
 }
 
-.sidebar-card, .panel, .condition-panel {
+.topbar-card, .panel, .condition-panel {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
 
-.sidebar-card { padding: 20px; }
+.topbar-card { padding: 20px; }
 .hero {
   background: linear-gradient(145deg, rgba(255, 247, 237, 0.96), rgba(253, 242, 230, 0.9));
+}
+
+.content {
+  width: 100%;
+}
+
+.topbar-card.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.topbar-copy,
+.topbar-actions {
+  min-width: 0;
+}
+
+.topbar-copy {
+  flex: 1;
+}
+
+.topbar-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.runs-card {
+  padding-bottom: 12px;
 }
 
 .eyebrow {
@@ -86,6 +120,23 @@ code {
   cursor: pointer;
 }
 
+.secondary-button {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 12px 18px;
+  background: rgba(255,255,255,0.72);
+  color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 input[type="search"] {
   width: 100%;
   border-radius: 14px;
@@ -104,15 +155,16 @@ input[type="search"] {
 
 .run-list {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 10px;
-  max-height: calc(100vh - 320px);
+  max-height: 220px;
   overflow: auto;
 }
 
 .run-button {
   text-align: left;
-  width: 100%;
+  width: min(100%, 320px);
   border: 1px solid var(--border);
   border-radius: 18px;
   background: rgba(255,255,255,0.72);
@@ -142,6 +194,12 @@ input[type="search"] {
   align-items: flex-start;
   gap: 16px;
   margin-bottom: 20px;
+}
+
+.condition-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .badge-row {
@@ -175,7 +233,7 @@ input[type="search"] {
 }
 
 .condition-grid {
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .metric-card {
@@ -213,6 +271,7 @@ input[type="search"] {
 table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 900px;
 }
 th, td {
   text-align: left;
@@ -229,6 +288,7 @@ th {
 
 .condition-panel {
   padding: 20px;
+  min-width: 0;
 }
 
 .condition-metrics {
@@ -282,12 +342,44 @@ th {
 
 .hidden { display: none; }
 
+@media (min-width: 1600px) {
+  .page-shell { gap: 28px; padding: 20px; }
+
+  .condition-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .card-grid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+}
+
 @media (max-width: 1100px) {
-  .page-shell {
-    grid-template-columns: 1fr;
+  .topbar-card.hero {
+    flex-direction: column;
   }
 
   .run-list {
     max-height: 320px;
   }
+
+  .run-button {
+    width: 100%;
+  }
+
+  .condition-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.condition-grid.focus-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.condition-grid.focus-mode .condition-panel {
+  display: none;
+}
+
+.condition-grid.focus-mode .condition-panel.focused {
+  display: block;
 }

@@ -8,25 +8,31 @@
 </head>
 <body>
   <div class="page-shell">
-    <aside class="sidebar">
-      <div class="sidebar-card hero">
-        <p class="eyebrow">NanoContext</p>
-        <h1>Benchmark Results</h1>
-        <p class="muted">Select the local <code>benchmark/runs</code> folder and inspect both aggregate trends and single-run details.</p>
-        <button id="pick-folder-button" class="primary-button">Select Runs Folder</button>
-        <p id="folder-status" class="tiny muted">No folder selected.</p>
+    <header class="topbar">
+      <div class="topbar-card hero">
+        <div class="topbar-copy">
+          <p class="eyebrow">NanoContext</p>
+          <h1>Benchmark Results</h1>
+          <p class="muted">Select the local <code>benchmark/runs</code> folder and inspect both aggregate trends and single-run details.</p>
+        </div>
+        <div class="topbar-actions">
+          <div class="hero-actions">
+            <button id="pick-folder-button" class="primary-button">Select Runs Folder</button>
+          </div>
+          <p id="folder-status" class="tiny muted">No folder selected.</p>
+        </div>
       </div>
 
-      <div class="sidebar-card">
+      <div class="topbar-card filter-card">
         <label for="run-filter">Run Filter</label>
         <input id="run-filter" type="search" placeholder="Search run id / task / repo">
       </div>
 
-      <div class="sidebar-card">
+      <div class="topbar-card runs-card">
         <div class="section-title">Runs</div>
         <div id="run-list" class="run-list"></div>
       </div>
-    </aside>
+    </header>
 
     <main class="content">
       <section class="panel">
@@ -70,7 +76,7 @@
           </div>
           <div id="selected-run-meta" class="badge-row"></div>
         </div>
-        <div id="selected-run-empty" class="empty-state">Pick a run from the left to inspect its metrics, logs, and raw outputs.</div>
+        <div id="selected-run-empty" class="empty-state">Pick a run from the top to inspect its metrics, logs, and raw outputs.</div>
         <div id="selected-run-content" class="hidden">
           <div id="selected-run-cards" class="card-grid"></div>
           <div id="selected-run-conditions" class="condition-grid"></div>
@@ -86,7 +92,10 @@
           <p class="eyebrow condition-eyebrow"></p>
           <h3 class="condition-title"></h3>
         </div>
-        <div class="badge-row condition-badges"></div>
+        <div class="condition-actions">
+          <div class="badge-row condition-badges"></div>
+          <button class="panel-expand-button secondary-button" type="button">Focus</button>
+        </div>
       </div>
       <div class="condition-metrics"></div>
       <div class="subsection">

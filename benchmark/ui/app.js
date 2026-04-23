@@ -2,6 +2,7 @@ const state = {
   runs: [],
   filteredRuns: [],
   selectedRunId: null,
+  focusedCondition: null,
 };
 
 const pickFolderButton = document.querySelector('#pick-folder-button');
@@ -34,6 +35,7 @@ pickFolderButton?.addEventListener('click', async () => {
     state.runs = runs.sort((a, b) => b.runId.localeCompare(a.runId));
     state.filteredRuns = [...state.runs];
     state.selectedRunId = state.filteredRuns[0]?.runId ?? null;
+    state.focusedCondition = null;
     folderStatus.textContent = `${state.runs.length} run(s) loaded from ${directoryHandle.name}.`;
     renderAll();
   } catch (error) {
@@ -54,6 +56,7 @@ runFilter?.addEventListener('input', () => {
 
   if (!state.filteredRuns.some((run) => run.runId === state.selectedRunId)) {
     state.selectedRunId = state.filteredRuns[0]?.runId ?? null;
+    state.focusedCondition = null;
   }
 
   renderRunList();
@@ -84,6 +87,7 @@ function renderRunList() {
     `;
     button.addEventListener('click', () => {
       state.selectedRunId = run.runId;
+      state.focusedCondition = null;
       renderRunList();
       renderSelectedRun();
     });
@@ -143,6 +147,7 @@ function renderAggregate() {
 function renderSelectedRun() {
   const run = state.runs.find((item) => item.runId === state.selectedRunId);
   if (!run) {
+    state.focusedCondition = null;
     selectedRunEmpty.classList.remove('hidden');
     selectedRunContent.classList.add('hidden');
     return;
@@ -172,6 +177,7 @@ function renderSelectedRun() {
   });
 
   selectedRunConditions.innerHTML = '';
+  selectedRunConditions.classList.toggle('focus-mode', Boolean(state.focusedCondition));
   for (const conditionName of ['baseline', 'nanocontext', 'nanocontext-smartsearch']) {
     const summary = run.conditions[conditionName];
     if (!summary) continue;
@@ -328,6 +334,10 @@ function buildAggregateAnalytics(runs) {
 
 function renderConditionPanel(conditionName, summary) {
   const fragment = conditionTemplate.content.cloneNode(true);
+  const panel = fragment.querySelector('.condition-panel');
+  panel.dataset.condition = conditionName;
+  panel.classList.toggle('focused', state.focusedCondition === conditionName);
+
   fragment.querySelector('.condition-eyebrow').textContent = summary.repository || 'Condition';
   fragment.querySelector('.condition-title').textContent = conditionName;
 
@@ -335,6 +345,13 @@ function renderConditionPanel(conditionName, summary) {
   badges.appendChild(createBadge(`Exit ${summary.exitCode}`, summary.exitCode === 0 ? 'good' : 'bad'));
   badges.appendChild(createBadge(`${formatNumber(totalTokens(summary.usage))} tokens`));
   badges.appendChild(createBadge(`${formatNumber(summary.durationMs)} ms`));
+
+  const expandButton = fragment.querySelector('.panel-expand-button');
+  expandButton.textContent = state.focusedCondition === conditionName ? 'Show All' : 'Focus';
+  expandButton.addEventListener('click', () => {
+    state.focusedCondition = state.focusedCondition === conditionName ? null : conditionName;
+    renderSelectedRun();
+  });
 
   const metrics = fragment.querySelector('.condition-metrics');
   [
@@ -346,14 +363,14 @@ function renderConditionPanel(conditionName, summary) {
     ['Messages', formatNumber(summary.consoleMessages?.length || 0)],
   ].forEach(([label, value]) => metrics.appendChild(createMiniMetric(label, value)));
 
-  fragment.querySelector('.final-answer').textContent = summary.finalAnswer || '(empty)';
+  fragment.querySelector('.final-answer').textContent = sanitizeTerminalText(summary.finalAnswer || '(empty)');
 
   const commandList = fragment.querySelector('.command-list');
   if (summary.commands?.length) {
     summary.commands.forEach((command) => {
       const element = document.createElement('pre');
       element.className = 'command-item';
-      element.textContent = `${command.command}\n\nExit: ${command.exitCode}\n\n${command.output || ''}`.trim();
+      element.textContent = sanitizeTerminalText(`${command.command}\n\nExit: ${command.exitCode}\n\n${command.output || ''}`.trim());
       commandList.appendChild(element);
     });
   } else {
@@ -365,7 +382,7 @@ function renderConditionPanel(conditionName, summary) {
     summary.consoleMessages.forEach((message) => {
       const element = document.createElement('pre');
       element.className = 'message-item';
-      element.textContent = message.text || '';
+      element.textContent = sanitizeTerminalText(message.text || '');
       messageList.appendChild(element);
     });
   } else {
@@ -475,6 +492,29 @@ function formatTimestamp(value) {
   if (!value) return 'Unknown time';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function sanitizeTerminalText(value) {
+  return normalizeMojibake(String(value ?? '')
+    .replaceAll(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
+    .replaceAll(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replaceAll(/\u001b[@-_]/g, '')
+    .replaceAll(/[\u0000-\u0008\u000b-\u001a\u007f-\u009f]/g, ''));
+}
+
+function normalizeMojibake(value) {
+  return value
+    .replaceAll('Γöé', '│')
+    .replaceAll('â”‚', '│')
+    .replaceAll('â”€', '─')
+    .replaceAll('â”œ', '├')
+    .replaceAll('â””', '└')
+    .replaceAll('â”¬', '┬')
+    .replaceAll('â”¼', '┼')
+    .replaceAll('â†’', '→')
+    .replaceAll('∩╗┐', '')
+    .replaceAll('ï»¿', '')
+    .replaceAll(/\uFEFF/g, '');
 }
 
 function escapeHtml(value) {

@@ -974,6 +974,9 @@ function Get-CodexBenchmarkSummary {
     $consoleMessages = @()
     $commands = @()
     $fileChanges = @()
+    $failedCommandCount = 0
+    $emptyResultCount = 0
+    $normalizedCommands = @()
 
     foreach ($line in (Get-Content -LiteralPath $ExecutionResult.EventsPath)) {
         if ([string]::IsNullOrWhiteSpace($line)) {
@@ -1008,6 +1011,14 @@ function Get-CodexBenchmarkSummary {
                     command = $event.item.command
                     output = $event.item.aggregated_output
                     exitCode = $event.item.exit_code
+                }
+                if ($null -ne $event.item.exit_code -and [int]$event.item.exit_code -ne 0) {
+                    $failedCommandCount++
+                }
+                $normalizedCommands += (Normalize-BenchmarkCommandText -CommandText ([string]$event.item.command))
+                $aggregatedOutput = [string]$event.item.aggregated_output
+                if ($aggregatedOutput -match "No results found|No memories found|Memory not found|No refs found|No callers found|No trace found") {
+                    $emptyResultCount++
                 }
             }
 
@@ -1055,6 +1066,13 @@ function Get-CodexBenchmarkSummary {
         consoleMessages = $consoleMessages
         commands = $commands
         fileChanges = $fileChanges
+        exploration = @{
+            commandCount = @($commands).Count
+            failedCommandCount = $failedCommandCount
+            emptyResultCount = $emptyResultCount
+            repeatedQueryCount = (Get-RepeatedBenchmarkCommandCount -Commands $normalizedCommands)
+            tokenCostPerCommand = $(if (@($commands).Count -gt 0 -and $lastTurnUsage) { [Math]::Round(((Get-TotalTokens -Usage $lastTurnUsage) / @($commands).Count), 2) } else { $null })
+        }
         nonJsonEventLines = $nonJsonLines
     }
 }
@@ -1149,8 +1167,60 @@ function Get-BenchmarkComparisonSummary {
             baselineFileChangeCount = @($BaselineSummary.fileChanges).Count
             nanocontextFileChangeCount = @($NanoContextSummary.fileChanges).Count
             nanocontextSmartSearchFileChangeCount = @($NanoContextSmartSearchSummary.fileChanges).Count
+            baselineExploration = $BaselineSummary.exploration
+            nanocontextExploration = $NanoContextSummary.exploration
+            nanocontextSmartSearchExploration = $NanoContextSmartSearchSummary.exploration
+            budgets = @{
+                baselineMaxCommandCount = 25
+                nanocontextMaxCommandCount = 40
+                smartsearchMaxCommandCount = 35
+                nanocontextWithinBudget = (($NanoContextSummary.exploration.commandCount ?? 0) -le 40)
+                smartsearchWithinBudget = (($NanoContextSmartSearchSummary.exploration.commandCount ?? 0) -le 35)
+            }
         }
     }
+}
+
+function Normalize-BenchmarkCommandText {
+    param(
+        [string]$CommandText
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CommandText)) {
+        return ""
+    }
+
+    return (($CommandText -replace '\[[^\]]+\]', '') -replace '\s+', ' ').Trim().ToLowerInvariant()
+}
+
+function Get-RepeatedBenchmarkCommandCount {
+    param(
+        [string[]]$Commands
+    )
+
+    if ($null -eq $Commands) {
+        return 0
+    }
+
+    $counts = @{}
+    foreach ($command in $Commands) {
+        if ([string]::IsNullOrWhiteSpace($command)) {
+            continue
+        }
+        if (-not $counts.ContainsKey($command)) {
+            $counts[$command] = 0
+        }
+        $counts[$command]++
+    }
+
+    $repeated = 0
+    foreach ($entry in $counts.GetEnumerator()) {
+        if ([int]$entry.Value -gt 1) {
+            $repeated += ([int]$entry.Value - 1)
+        }
+    }
+
+    return $repeated
 }
 
 function Get-TotalTokens {

@@ -12,8 +12,11 @@ import { mcpServerCommand } from './commands/mcp-server';
 import { getCommand } from './commands/get';
 import { peekCommand } from './commands/peek';
 import { openCommand } from './commands/open';
+import { symbolCommand } from './commands/symbol';
+import { filesCommand } from './commands/files';
 import { refsCommand } from './commands/refs';
 import { callersCommand } from './commands/callers';
+import { calleesCommand } from './commands/callees';
 import { traceCommand } from './commands/trace';
 import { clearCommand } from './commands/clear';
 
@@ -62,9 +65,10 @@ watchCmd
   .action(watchStopCommand);
 
 program
-  .command('search <query>')
+  .command('search [query]')
   .alias('s')
   .description('Search codebase (exact text by default)')
+  .option('-q, --query <query...>', 'Run multiple queries in one command')
   .option('-v, --vector', 'Use vector/semantic search')
   .option('-d, --deep', 'Include full data: sigs, refs, insights (use with -v or -r)')
   .option('-r, --regex', 'Regex search on names/signatures')
@@ -102,6 +106,18 @@ program
   .action(openCommand);
 
 program
+  .command('symbol [query]')
+  .description('Resolve a symbol name to ranked candidates')
+  .option('-q, --query <query...>', 'Resolve multiple symbol queries in one command')
+  .action(symbolCommand);
+
+program
+  .command('files [query]')
+  .description('List indexed files or search them by partial name')
+  .option('-q, --query <query...>', 'Search multiple filename queries in one command')
+  .action(filesCommand);
+
+program
   .command('refs <symbol>')
   .description('Show direct refs/callees for a symbol')
   .option('-d, --depth <number>', 'Trace depth')
@@ -111,6 +127,11 @@ program
   .command('callers <symbol>')
   .description('Show likely inbound references for a symbol')
   .action(callersCommand);
+
+program
+  .command('callees <symbol>')
+  .description('Show likely outbound calls for a symbol')
+  .action(calleesCommand);
 
 program
   .command('trace <symbol>')
@@ -123,6 +144,7 @@ program
   .description('Add a note to project memory')
   .option('--ref <reference>', 'Optional reference')
   .option('-f, --file <path>', 'Attach the memory to a file')
+  .option('--symbol <query>', 'Attach the memory to a symbol')
   .action(rememberCommand);
 
 program
@@ -130,6 +152,7 @@ program
   .description('List all memories')
   .option('-s, --search <query>', 'Filter memories')
   .option('-f, --file <path>', 'Only show memories for one file')
+  .option('--symbol <query>', 'Only show memories for one symbol')
   .action(memoriesCommand);
 
 program

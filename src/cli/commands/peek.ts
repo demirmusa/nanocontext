@@ -16,7 +16,7 @@ async function renderPreview(target: string, mode: 'peek'): Promise<void> {
   try {
     await container.initialize();
     const resolved = await container.codeReadService.peekTarget(target);
-    renderResolvedPreview(resolved.target.file, resolved.target.loc, resolved.snippet.content, resolved.target.sig, mode);
+    renderResolvedPreview(resolved.target, resolved.snippet.content, mode);
     if (resolved.memories?.length) {
       console.log('');
       console.log(colors.cyan('File Notes:'));
@@ -32,15 +32,18 @@ async function renderPreview(target: string, mode: 'peek'): Promise<void> {
   }
 }
 
-function renderResolvedPreview(filePath: string, loc: string, content: string, sig?: string, mode?: 'peek'): void {
+function renderResolvedPreview(target: { file: string; loc: string; sig?: string; symbol?: string; matchType?: string; confidence?: string }, content: string, mode?: 'peek'): void {
   const label = mode ? ` ${mode}` : '';
-  console.log(colors.bold(`\n${filePath}`) + colors.dim(` [${loc}]${label}`));
-  if (sig) {
-    console.log(colors.dim(sig));
+  console.log(colors.bold(`\n${target.file}`) + colors.dim(` [${target.loc}]${label}`));
+  if (target.sig) {
+    console.log(colors.dim(target.sig));
+  }
+  if (target.matchType || target.confidence) {
+    console.log(colors.dim(`resolved: ${target.symbol ?? target.file} (${target.matchType ?? 'fallback'}, ${target.confidence ?? 'low'})`));
   }
   console.log('');
 
-  const [start] = loc.split('-').map(Number);
+  const [start] = target.loc.split('-').map(Number);
   const lines = content.split('\n');
   const gutterWidth = String(start + lines.length - 1).length;
 

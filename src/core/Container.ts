@@ -16,6 +16,7 @@ import { CodeReadService } from './services/CodeReadService';
 import { DependencyService } from './services/DependencyService';
 import { IndexService } from './services/IndexService';
 import { InspectionService } from './services/InspectionService';
+import { FileDiscoveryService } from './services/FileDiscoveryService';
 import { MemoryService } from './services/MemoryService';
 import { ProjectDataService } from './services/ProjectDataService';
 import { ProjectInitService } from './services/ProjectInitService';
@@ -55,6 +56,7 @@ export class Container {
   private _dependencyService: DependencyService | null = null;
   private _indexService: IndexService | null = null;
   private _inspectionService: InspectionService | null = null;
+  private _fileDiscoveryService: FileDiscoveryService | null = null;
   private _memoryService: MemoryService | null = null;
   private _projectDataService: ProjectDataService | null = null;
   private _projectInitService: ProjectInitService | null = null;
@@ -212,14 +214,14 @@ export class Container {
 
   get dependencyService(): DependencyService {
     if (!this._dependencyService) {
-      this._dependencyService = new DependencyService(this.configManager, this.headerStore, this.stateStore);
+      this._dependencyService = new DependencyService(this.configManager, this.headerStore, this.stateStore, this.codeReadService);
     }
     return this._dependencyService;
   }
 
   get memoryService(): MemoryService {
     if (!this._memoryService) {
-      this._memoryService = new MemoryService(this.memoryStore, this.configManager);
+      this._memoryService = new MemoryService(this.memoryStore, this.configManager, this.codeReadService);
     }
     return this._memoryService;
   }
@@ -229,6 +231,13 @@ export class Container {
       this._inspectionService = new InspectionService(this.configManager, this.headerStore);
     }
     return this._inspectionService;
+  }
+
+  get fileDiscoveryService(): FileDiscoveryService {
+    if (!this._fileDiscoveryService) {
+      this._fileDiscoveryService = new FileDiscoveryService(this.stateStore);
+    }
+    return this._fileDiscoveryService;
   }
 
   get statusService(): StatusService {
@@ -245,6 +254,7 @@ export class Container {
         this.configManager,
         this._llmProvider,
         this.logger,
+        this.memoryStore,
       );
     }
     return this._searchService;

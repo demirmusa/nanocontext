@@ -62,6 +62,13 @@ export interface SearchResult {
   suggestedNextConfidence?: number;
   related?: Array<Pick<SearchResult, 'file' | 'method' | 'class' | 'loc' | 'sig'>>;
   searchIntent?: 'exact-symbol' | 'trace' | 'semantic' | 'dependency' | 'mixed';
+  fallback?: {
+    originalQuery: string;
+    mode: 'exact' | 'regex' | 'vector' | 'normalized-exact' | 'semantic';
+    from: 'exact' | 'regex' | 'vector';
+    reason: string;
+  };
+  memoryHint?: string;
   searchTelemetry?: {
     route?: string;
     rerankUsed?: boolean;
@@ -95,6 +102,20 @@ export interface ResolvedSymbolTarget {
   loc: string;
   sig?: string;
   type: 'method' | 'class';
+  matchType?: 'exact' | 'qualified' | 'id' | 'fallback';
+  confidence?: 'high' | 'medium' | 'low';
+}
+
+export interface SymbolCandidate extends ResolvedSymbolTarget {
+  display: string;
+}
+
+export interface SymbolResolution {
+  query: string;
+  matched?: SymbolCandidate;
+  candidates: SymbolCandidate[];
+  ambiguous?: boolean;
+  reason?: string;
 }
 
 export interface SmartSearchCandidate {
@@ -153,7 +174,9 @@ export interface MemoryRecord {
   createdAt: string;
   ref?: string;
   file?: string;
-  scope?: 'project' | 'file';
+  symbol?: string;
+  symbolId?: string;
+  scope?: 'project' | 'file' | 'symbol';
 }
 
 export interface TraceStep {
@@ -161,6 +184,23 @@ export interface TraceStep {
   symbol: string;
   loc?: string;
   refs: string[];
+}
+
+export interface TraceRelation {
+  symbol: string;
+  path: string;
+  range: string;
+  confidence: 'high' | 'medium' | 'low' | 'missing-index';
+  kind: 'caller' | 'callee' | 'trace' | 'candidate';
+  reason?: string;
+}
+
+export interface TraceSurfaceResult {
+  target?: TraceRelation;
+  results: TraceRelation[];
+  related?: TraceRelation[];
+  suggestedNext?: string;
+  warning?: string;
 }
 
 export interface ScanProgress {

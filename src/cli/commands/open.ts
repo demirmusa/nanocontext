@@ -24,6 +24,9 @@ export async function openCommand(
     if (resolved.target.sig) {
       console.log(colors.dim(resolved.target.sig));
     }
+    if (resolved.target.matchType || resolved.target.confidence) {
+      console.log(colors.dim(`resolved: ${resolved.target.symbol} (${resolved.target.matchType ?? 'fallback'}, ${resolved.target.confidence ?? 'low'})`));
+    }
     console.log('');
 
     const [start] = resolved.target.loc.split('-').map(Number);
@@ -42,7 +45,12 @@ export async function openCommand(
       }
     }
   } catch (err) {
-    console.error(colors.red(`Open failed: ${err}`));
+    const message = String(err);
+    if (message.includes('No symbol match found')) {
+      console.error(colors.red(`${message} Try \`nc files "${target}"\` or \`nc symbol "${target}"\`.`));
+    } else {
+      console.error(colors.red(`Open failed: ${err}`));
+    }
     process.exit(1);
   } finally {
     await container.dispose();

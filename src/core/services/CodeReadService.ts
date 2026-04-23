@@ -3,7 +3,7 @@ import { IConfigManager } from '../interfaces/IConfigManager';
 import { IHeaderStore } from '../interfaces/IHeaderStore';
 import { IStateStore } from '../interfaces/IStateStore';
 import { IMemoryStore } from '../interfaces/IMemoryStore';
-import { CodeFileSummary, MemoryRecord, ResolvedSymbolTarget, SearchResult } from '../interfaces/types';
+import { CodeFileSummary, MemoryRecord, ResolvedSymbolTarget, SearchResult, SymbolCandidate, SymbolResolution } from '../interfaces/types';
 import { ProjectPathError, resolveProjectPath } from '../../utils/projectPath';
 
 export interface CodeSnippetResult {
@@ -95,18 +95,16 @@ export class CodeReadService {
   }
 
   async readSymbolSnippet(target: string): Promise<ResolvedSymbolSnippetResult> {
-    const resolved = target.includes('#')
-      ? await this.resolveFileScopedSymbol(target)
-      : this.resolveIndexedSymbol(target);
-
-    if (!resolved) {
+    const resolution = await this.resolveSymbolTarget(target);
+    if (!resolution.matched || resolution.ambiguous) {
       throw new Error(`No symbol match found for ${target}.`);
     }
+    const resolved = resolution.matched;
 
     return {
       target: resolved,
       snippet: this.readSnippet(resolved.file, resolved.loc),
-      memories: await this.memoryStore.listByFile(resolved.file),
+      memories: await this.collectMemoriesForTarget(resolved),
     };
   }
 
@@ -116,6 +114,30 @@ export class CodeReadService {
 
   async openTarget(target: string, options?: TargetPreviewOptions): Promise<ResolvedSymbolSnippetResult> {
     return this.readTargetPreview(target, options?.around ?? 12, 120, options);
+  }
+
+  async resolveSymbolTarget(target: string): Promise<SymbolResolution> {
+    const trimmed = target.trim();
+    if (!trimmed) {
+      return { query: target, candidates: [], reason: 'empty query' };
+    }
+
+    const candidates = trimmed.includes('#')
+      ? await this.resolveFileScopedSymbolCandidates(trimmed)
+      : await this.resolveIndexedSymbolCandidates(trimmed);
+
+    if (candidates.length === 0) {
+      return { query: target, candidates: [], reason: 'no indexed symbol match' };
+    }
+
+    const [matched, ...rest] = candidates;
+    return {
+      query: target,
+      matched,
+      candidates,
+      ambiguous: rest.length > 0 && sameResolutionScore(matched, rest[0]),
+      reason: rest.length > 0 ? `top candidates: ${candidates.slice(0, 3).map(candidate => `${candidate.display} ${candidate.file}[${candidate.loc}]`).join('; ')}` : undefined,
+    };
   }
 
   async readSnippetAround(filePath: string, loc: string, around: number): Promise<ResolvedSymbolSnippetResult> {
@@ -144,60 +166,61 @@ export class CodeReadService {
     }
   }
 
-  private async resolveFileScopedSymbol(target: string): Promise<ResolvedSymbolTarget | null> {
+  private async resolveFileScopedSymbolCandidates(target: string): Promise<SymbolCandidate[]> {
     const separatorIndex = target.indexOf('#');
     const filePath = target.slice(0, separatorIndex);
     const symbol = target.slice(separatorIndex + 1).trim();
     if (!symbol) {
-      return null;
+      return [];
     }
 
     const summary = await this.readFileSummary(filePath);
     if (summary.error) {
-      return null;
+      return [];
     }
 
     const header = await this.headerStore.read(summary.file);
     if (!header) {
-      return null;
+      return [];
     }
 
     const normalizedSymbol = symbol.toLowerCase();
-    const method = header.methods.find(item =>
+    const methodMatches = header.methods.filter(item =>
       item.name.toLowerCase() === normalizedSymbol
       || `${item.class ?? ''}.${item.name}`.toLowerCase() === normalizedSymbol,
     );
-    if (method) {
-      return {
+    const classMatches = header.classes.filter(item => item.name.toLowerCase() === normalizedSymbol);
+    return [
+      ...methodMatches.map(method => ({
         file: header.file,
-        symbol,
+        symbol: method.class ? `${method.class}#${method.name}` : method.name,
+        display: method.class ? `${method.class}#${method.name}` : method.name,
         loc: method.loc,
         sig: method.sig,
-        type: 'method',
-      };
-    }
-
-    const cls = header.classes.find(item => item.name.toLowerCase() === normalizedSymbol);
-    if (cls) {
-      return {
+        type: 'method' as const,
+        matchType: 'qualified' as const,
+        confidence: 'high' as const,
+      })),
+      ...classMatches.map(cls => ({
         file: header.file,
-        symbol,
+        symbol: cls.name,
+        display: cls.name,
         loc: cls.loc,
-        type: 'class',
-      };
-    }
-
-    return null;
+        type: 'class' as const,
+        matchType: 'exact' as const,
+        confidence: 'high' as const,
+      })),
+    ];
   }
 
-  private resolveIndexedSymbol(target: string): ResolvedSymbolTarget | null {
-    const exact = this.pickSymbolResult(this.stateStore.searchExact(target, 5), target);
-    if (exact) {
+  private async resolveIndexedSymbolCandidates(target: string): Promise<SymbolCandidate[]> {
+    const exact = this.pickSymbolResults(this.stateStore.searchExact(target, 8), target);
+    if (exact.length > 0) {
       return exact;
     }
 
     const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return this.pickSymbolResult(this.stateStore.searchRegex(escaped, 5), target);
+    return this.pickSymbolResults(this.stateStore.searchRegex(escaped, 8), target);
   }
 
   private async readTargetPreview(
@@ -221,13 +244,14 @@ export class CodeReadService {
       };
     }
 
-    const resolved = target.includes('#')
-      ? await this.resolveFileScopedSymbol(target)
-      : this.resolveIndexedSymbol(target);
-
-    if (!resolved) {
+    const resolution = await this.resolveSymbolTarget(target);
+    if (!resolution.matched) {
       throw new Error(`No symbol match found for ${target}.`);
     }
+    if (resolution.ambiguous) {
+      throw new Error(`Ambiguous symbol target "${target}". ${resolution.reason}`);
+    }
+    const resolved = resolution.matched;
 
     if (options?.classContext && resolved.type === 'method') {
       const classTarget = await this.resolveClassContext(resolved);
@@ -235,7 +259,7 @@ export class CodeReadService {
       return {
         target: classTarget,
         snippet: this.readSnippet(classTarget.file, classTarget.loc),
-        memories: await this.memoryStore.listByFile(classTarget.file),
+        memories: await this.collectMemoriesForTarget(classTarget),
       };
     }
     }
@@ -247,12 +271,13 @@ export class CodeReadService {
         loc: previewLoc,
       },
       snippet: this.readSnippet(resolved.file, previewLoc),
-      memories: await this.memoryStore.listByFile(resolved.file),
+      memories: await this.collectMemoriesForTarget(resolved),
     };
   }
 
-  private pickSymbolResult(results: SearchResult[], rawTarget: string): ResolvedSymbolTarget | null {
+  private pickSymbolResults(results: SearchResult[], rawTarget: string): SymbolCandidate[] {
     const normalizedTarget = rawTarget.toLowerCase();
+    const candidates: Array<SymbolCandidate & { score: number }> = [];
 
     for (const result of results) {
       if (!result.file || !result.loc || (result.type !== 'method' && result.type !== 'class')) {
@@ -263,38 +288,39 @@ export class CodeReadService {
       const className = result.class?.toLowerCase();
       const qualifiedName = methodName && className ? `${className}.${methodName}` : undefined;
 
-      if (
-        methodName === normalizedTarget
-        || className === normalizedTarget
-        || qualifiedName === normalizedTarget
-      ) {
-        return {
-          file: result.file,
-          symbol: rawTarget,
-          loc: result.loc,
-          sig: result.sig,
-          type: result.type,
-        };
+      let score = 40;
+      let matchType: SymbolCandidate['matchType'] = 'fallback';
+      let confidence: SymbolCandidate['confidence'] = 'low';
+      if (qualifiedName === normalizedTarget || `${className}#${methodName}` === normalizedTarget) {
+        score = 120;
+        matchType = 'qualified';
+        confidence = 'high';
+      } else if (methodName === normalizedTarget || className === normalizedTarget) {
+        score = 100;
+        matchType = 'exact';
+        confidence = 'high';
+      } else if (result.id?.toLowerCase() === normalizedTarget) {
+        score = 90;
+        matchType = 'id';
+        confidence = 'medium';
       }
+
+      candidates.push({
+        file: result.file,
+        symbol: result.type === 'method' ? (result.class ? `${result.class}#${result.method}` : `${result.method}`) : (result.class || rawTarget),
+        display: result.type === 'method' ? (result.class ? `${result.class}#${result.method}` : `${result.method}`) : (result.class || rawTarget),
+        loc: result.loc,
+        sig: result.sig,
+        type: result.type,
+        matchType,
+        confidence,
+        score,
+      });
     }
 
-    const fallback = results.find(result =>
-      result.file
-      && result.loc
-      && (result.type === 'method' || result.type === 'class'),
-    );
-
-    if (!fallback || !fallback.file || !fallback.loc || (fallback.type !== 'method' && fallback.type !== 'class')) {
-      return null;
-    }
-
-    return {
-      file: fallback.file,
-      symbol: rawTarget,
-      loc: fallback.loc,
-      sig: fallback.sig,
-      type: fallback.type,
-    };
+    return dedupeCandidates(candidates)
+      .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file) || a.loc.localeCompare(b.loc))
+      .map(({ score: _score, ...candidate }) => candidate);
   }
 
   private async resolveClassContext(target: ResolvedSymbolTarget): Promise<ResolvedSymbolTarget | null> {
@@ -321,6 +347,21 @@ export class CodeReadService {
       type: 'class',
     };
   }
+
+  private async collectMemoriesForTarget(target: ResolvedSymbolTarget): Promise<MemoryRecord[]> {
+    if (!target.matchType && !target.confidence) {
+      return this.memoryStore.listByFile(target.file);
+    }
+
+    const symbolId = `${target.file}:${target.loc}:${target.type}:${target.symbol}`;
+    const symbolMemories = typeof this.memoryStore.listBySymbol === 'function'
+      ? await this.memoryStore.listBySymbol(symbolId)
+      : [];
+    if (symbolMemories.length > 0) {
+      return symbolMemories;
+    }
+    return this.memoryStore.listByFile(target.file);
+  }
 }
 
 function expandLoc(loc: string, padding: number): string {
@@ -330,4 +371,20 @@ function expandLoc(loc: string, padding: number): string {
   }
 
   return `${Math.max(1, start - padding)}-${end + padding}`;
+}
+
+function sameResolutionScore(a: SymbolCandidate, b: SymbolCandidate): boolean {
+  return (a.confidence ?? 'low') === (b.confidence ?? 'low') && (a.matchType ?? 'fallback') === (b.matchType ?? 'fallback');
+}
+
+function dedupeCandidates(candidates: Array<SymbolCandidate & { score: number }>): Array<SymbolCandidate & { score: number }> {
+  const seen = new Set<string>();
+  return candidates.filter(candidate => {
+    const key = `${candidate.file}:${candidate.loc}:${candidate.display}:${candidate.type}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }

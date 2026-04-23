@@ -19,7 +19,7 @@ export async function getCommand(target: string, options: { around?: string } = 
         const resolved = around > 0
           ? await container.codeReadService.peekTarget(target, { around })
           : await container.codeReadService.readSymbolSnippet(target);
-        renderResolvedSnippet(resolved.target.file, resolved.target.loc, resolved.snippet.content, resolved.target.sig);
+        renderResolvedSnippet(resolved.target, resolved.snippet.content);
         renderMemories(resolved.memories);
 
         if (resolved.snippet.warning) {
@@ -101,7 +101,7 @@ export async function getCommand(target: string, options: { around?: string } = 
       console.warn(colors.yellow(snippet.warning));
     }
 
-    renderResolvedSnippet(snippetResult.target.file, snippetResult.target.loc, snippet.content);
+    renderResolvedSnippet(snippetResult.target, snippet.content);
   } catch (err) {
     console.error(colors.red(`Get failed: ${err}`));
     process.exit(1);
@@ -119,20 +119,19 @@ function parseAroundOption(value: string | undefined, fallback: number): number 
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-function renderResolvedSnippet(filePath: string, loc: string, content: string, sig?: string): void {
-  console.log(colors.bold(`\n${filePath}`) + colors.dim(` [${loc}]`));
-  if (sig) {
-    console.log(colors.dim(sig));
+function renderResolvedSnippet(target: { file: string; loc: string; sig?: string; symbol?: string; matchType?: string; confidence?: string }, content: string): void {
+  console.log(colors.bold(`\n${target.file}`) + colors.dim(` [${target.loc}]`));
+  if (target.sig) {
+    console.log(colors.dim(target.sig));
+  }
+  if (target.matchType || target.confidence) {
+    console.log(colors.dim(`resolved: ${target.symbol ?? target.file} (${target.matchType ?? 'fallback'}, ${target.confidence ?? 'low'})`));
   }
   console.log('');
 
-  const [start] = loc.split('-').map(Number);
-  const lines = content.split('\n');
-  const gutterWidth = String(start + lines.length - 1).length;
-
-  for (let index = 0; index < lines.length; index++) {
-    const lineNum = String(start + index).padStart(gutterWidth, ' ');
-    console.log(`${colors.dim(lineNum + '│')} ${lines[index]}`);
+  const [start] = target.loc.split('-').map(Number);
+  for (const line of formatCompactSnippetLines(content, start)) {
+    console.log(line);
   }
 }
 
@@ -146,4 +145,26 @@ function renderMemories(memories?: Array<{ text: string }>): void {
   for (const memory of memories.slice(0, 3)) {
     console.log(colors.dim(`  - ${memory.text}`));
   }
+}
+
+export function formatCompactSnippetLines(content: string, startLine: number): string[] {
+  const lines = content.split('\n');
+  if (lines.length === 0) {
+    return [];
+  }
+
+  const endLine = startLine + lines.length - 1;
+  const gutterWidth = String(endLine).length;
+  if (lines.length <= 2) {
+    return lines.map((line, index) => {
+      const lineNum = String(startLine + index).padStart(gutterWidth, ' ');
+      return `${colors.dim(lineNum + '│')} ${line}`;
+    });
+  }
+
+  return [
+    `${colors.dim(String(startLine).padStart(gutterWidth, ' ') + '│')} ${lines[0]}`,
+    ...lines.slice(1, -1),
+    `${colors.dim(String(endLine).padStart(gutterWidth, ' ') + '│')} ${lines[lines.length - 1]}`,
+  ];
 }

@@ -1,15 +1,32 @@
 import { IMemoryStore } from '../interfaces/IMemoryStore';
-import { MemoryRecord } from '../interfaces/types';
+import { MemoryRecord, SymbolResolution } from '../interfaces/types';
 import { IConfigManager } from '../interfaces/IConfigManager';
 import { normalizeProjectPath } from '../../utils/projectPath';
+import { CodeReadService } from './CodeReadService';
 
 export class MemoryService {
   constructor(
     private memoryStore: IMemoryStore,
     private configManager: IConfigManager,
+    private codeReadService: CodeReadService,
   ) {}
 
-  remember(text: string, ref?: string, file?: string): Promise<MemoryRecord> {
+  async remember(text: string, ref?: string, file?: string, symbol?: string): Promise<MemoryRecord> {
+    if (symbol) {
+      const resolution = await this.codeReadService.resolveSymbolTarget(symbol);
+      if (!resolution.matched || resolution.ambiguous) {
+        throw new Error(buildSymbolMemoryError(symbol, resolution));
+      }
+      return this.memoryStore.add(
+        text,
+        ref,
+        resolution.matched.file,
+        'symbol',
+        resolution.matched.display,
+        buildSymbolId(resolution.matched),
+      );
+    }
+
     const normalizedFile = this.normalizeOptionalFile(file ?? ref);
     return this.memoryStore.add(
       text,
@@ -19,12 +36,21 @@ export class MemoryService {
     );
   }
 
-  list(search?: string, file?: string): Promise<MemoryRecord[]> {
-    return this.memoryStore.list(search, this.normalizeOptionalFile(file));
+  async list(search?: string, file?: string, symbol?: string): Promise<MemoryRecord[]> {
+    const symbolId = symbol ? await this.resolveSymbolId(symbol) : undefined;
+    return this.memoryStore.list(search, this.normalizeOptionalFile(file), symbolId);
   }
 
   listByFile(file: string): Promise<MemoryRecord[]> {
     return this.memoryStore.listByFile(normalizeProjectPath(file, this.configManager.getProjectRoot()));
+  }
+
+  async listBySymbol(symbol: string): Promise<MemoryRecord[]> {
+    const symbolId = await this.resolveSymbolId(symbol);
+    if (!symbolId) {
+      return [];
+    }
+    return this.memoryStore.listBySymbol(symbolId);
   }
 
   forget(id: string): Promise<boolean> {
@@ -50,4 +76,23 @@ export class MemoryService {
       return undefined;
     }
   }
+
+  private async resolveSymbolId(symbol: string): Promise<string | undefined> {
+    const resolution = await this.codeReadService.resolveSymbolTarget(symbol);
+    if (!resolution.matched || resolution.ambiguous) {
+      return undefined;
+    }
+    return buildSymbolId(resolution.matched);
+  }
+}
+
+function buildSymbolId(symbol: { file: string; loc: string; type: string; display?: string }): string {
+  return `${symbol.file}:${symbol.loc}:${symbol.type}:${symbol.display ?? ''}`;
+}
+
+function buildSymbolMemoryError(symbol: string, resolution: SymbolResolution): string {
+  if (resolution.ambiguous) {
+    return `Ambiguous symbol "${symbol}". ${resolution.reason ?? 'Use a qualified name.'}`;
+  }
+  return `No symbol match found for "${symbol}".`;
 }

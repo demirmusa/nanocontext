@@ -35,7 +35,7 @@ const KEY_MAP: Record<string, string> = {
   type: 't', file: 'f', method: 'm', class: 'c', loc: 'l',
   score: 's', sig: 'sg', insight: 'i', refs: 'r', text: 'x',
   suggestedNext: 'n', suggestedNextReason: 'nr', suggestedNextConfidence: 'nc',
-  related: 'rel', searchIntent: 'si', searchTelemetry: 'st',
+  related: 'rel', searchIntent: 'si', searchTelemetry: 'st', fallback: 'fb',
 };
 function shorten(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -131,6 +131,14 @@ export class McpServer {
             return text((snippet.warning ? `${snippet.warning}\n` : '') + snippet.content);
           }
 
+          case 'symbol': {
+            return json(await this.container.codeReadService.resolveSymbolTarget(args?.query as string));
+          }
+
+          case 'files': {
+            return json(this.container.fileDiscoveryService.list(args?.query as string | undefined));
+          }
+
           case 'deps': {
             const refs = await this.container.dependencyService.getRefs(
               args?.f as string,
@@ -141,16 +149,25 @@ export class McpServer {
           }
 
           case 'remember': {
-            await this.container.memoryService.remember(args?.text as string, args?.ref as string, args?.file as string | undefined);
+            await this.container.memoryService.remember(
+              args?.text as string,
+              args?.ref as string,
+              args?.file as string | undefined,
+              args?.symbol as string | undefined,
+            );
             return text('ok');
           }
 
           case 'memories': {
-            const list = await this.container.memoryService.list(args?.q as string, args?.file as string | undefined);
+            const list = await this.container.memoryService.list(
+              args?.q as string,
+              args?.file as string | undefined,
+              args?.symbol as string | undefined,
+            );
             if (args?.id) {
-              return json(list.map(m => ({ id: m.id, text: m.text, ref: m.ref, file: m.file, scope: m.scope })));
+              return json(list.map(m => ({ id: m.id, text: m.text, ref: m.ref, file: m.file, symbol: m.symbol, scope: m.scope })));
             }
-            return json(list.map(m => ({ text: m.text, ref: m.ref, file: m.file, scope: m.scope })));
+            return json(list.map(m => ({ text: m.text, ref: m.ref, file: m.file, symbol: m.symbol, scope: m.scope })));
           }
 
           case 'refs': {
@@ -159,6 +176,10 @@ export class McpServer {
 
           case 'callers': {
             return json(await this.container.dependencyService.getCallers(args?.symbol as string));
+          }
+
+          case 'callees': {
+            return json(await this.container.dependencyService.getCallees(args?.symbol as string));
           }
 
           case 'trace': {

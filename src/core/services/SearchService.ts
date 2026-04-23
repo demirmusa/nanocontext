@@ -1,8 +1,11 @@
 import { IConfigManager } from '../interfaces/IConfigManager';
 import { ILLMProvider } from '../interfaces/ILLMProvider';
 import { ILogger } from '../interfaces/ILogger';
+import { IMemoryStore } from '../interfaces/IMemoryStore';
 import { ISearchEngine } from '../interfaces/ISearchEngine';
 import { SearchResult, SmartSearchCandidate } from '../interfaces/types';
+
+type SearchFallback = NonNullable<SearchResult['fallback']>;
 
 export type SearchMode = 'exact' | 'regex' | 'vector';
 export type SearchTypeFilter = 'method' | 'class' | 'memory' | 'all';
@@ -24,6 +27,7 @@ export class SearchService {
     private configManager: IConfigManager,
     private llmProvider: ILLMProvider | null = null,
     private logger?: ILogger,
+    private memoryStore?: IMemoryStore,
   ) {}
 
   async execute(request: SearchRequest): Promise<SearchResult[]> {
@@ -39,11 +43,11 @@ export class SearchService {
     let results: SearchResult[];
     if (request.mode === 'regex') {
       if (request.deep) {
-        results = this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.searchRegexDeep(request.query, limit)), request.query, intent, ['regex']);
+        results = await this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.searchRegexDeep(request.query, limit)), request.query, intent, ['regex']);
         this.storeCachedResults(cacheKey, results);
         return results;
       }
-      results = this.finalizeResults(this.attachSuggestedNext(request.mode, this.searchEngine.searchRegex(request.query, limit)), request.query, intent, ['regex']);
+      results = await this.finalizeResults(this.attachSuggestedNext(request.mode, this.searchEngine.searchRegex(request.query, limit)), request.query, intent, ['regex']);
       this.storeCachedResults(cacheKey, results);
       return results;
     }
@@ -55,17 +59,17 @@ export class SearchService {
         return results;
       }
       if (request.deep) {
-        results = this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.searchDeep(request.query, limit, request.typeFilter)), request.query, intent, ['vector']);
+        results = await this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.searchDeep(request.query, limit, request.typeFilter)), request.query, intent, ['vector']);
         this.storeCachedResults(cacheKey, results);
         return results;
       }
-      results = this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.search(request.query, limit, request.typeFilter)), request.query, intent, ['vector']);
+      results = await this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.search(request.query, limit, request.typeFilter)), request.query, intent, ['vector']);
       this.storeCachedResults(cacheKey, results);
       return results;
     }
 
     if (intent === 'semantic' && request.mode === 'exact') {
-      const semanticResults = this.finalizeResults(
+      const semanticResults = await this.finalizeResults(
         this.attachSuggestedNext('vector', await this.searchEngine.search(request.query, limit, request.typeFilter)),
         request.query,
         intent,
@@ -77,7 +81,7 @@ export class SearchService {
 
     const exactResults = this.searchEngine.searchExact(request.query, limit);
     if (exactResults.length > 0) {
-      results = this.finalizeResults(this.attachSuggestedNext(request.mode, exactResults), request.query, intent, ['exact']);
+      results = await this.finalizeResults(this.attachSuggestedNext(request.mode, exactResults), request.query, intent, ['exact']);
       this.storeCachedResults(cacheKey, results);
       return results;
     }
@@ -86,49 +90,46 @@ export class SearchService {
     if (normalizedQuery && normalizedQuery !== request.query) {
       const normalizedResults = this.searchEngine.searchExact(normalizedQuery, limit);
       if (normalizedResults.length > 0) {
-        results = this.finalizeResults(this.attachSuggestedNext(
-          request.mode,
-          normalizedResults.map(result => ({
-            ...result,
-            matchReason: `No exact match for "${request.query}". Showing normalized exact results for "${normalizedQuery}".`,
-          })),
-        ), request.query, intent, ['exact', 'normalized-exact']);
+        results = await this.finalizeResults(
+          this.markFallbackResults(
+            this.attachSuggestedNext(request.mode, normalizedResults),
+            request.query,
+            'normalized-exact',
+            'exact',
+            `no exact matches; retried with normalized query "${normalizedQuery}"`,
+          ),
+          request.query,
+          intent,
+          ['exact', 'normalized-exact'],
+        );
         this.storeCachedResults(cacheKey, results);
         return results;
       }
-    }
-
-    const regexPattern = escapeRegex(normalizedQuery || request.query);
-    const regexResults = this.searchEngine.searchRegex(regexPattern, limit);
-    if (regexResults.length > 0) {
-      results = this.finalizeResults(this.attachSuggestedNext(
-        'regex',
-        regexResults.map(result => ({
-          ...result,
-          matchReason: `No exact match for "${request.query}". Showing closest regex matches for "${normalizedQuery || request.query}".`,
-        })),
-      ), request.query, intent, ['exact', 'regex-fallback']);
-      this.storeCachedResults(cacheKey, results);
-      return results;
     }
 
     const emptyKey = this.buildEmptyQueryKey(request, limit);
     const emptyCount = (this.emptyQueryCounts.get(emptyKey) ?? 0) + 1;
     this.emptyQueryCounts.set(emptyKey, emptyCount);
 
-    if (emptyCount > 1) {
-      const semanticResults = this.attachSuggestedNext(
-        'vector',
-        await this.searchEngine.search(normalizedQuery || request.query, limit, request.typeFilter),
+    const semanticResults = this.attachSuggestedNext(
+      'vector',
+      await this.searchEngine.search(normalizedQuery || request.query, limit, request.typeFilter),
+    );
+    if (semanticResults.length > 0) {
+      results = await this.finalizeResults(
+        this.markFallbackResults(
+          semanticResults,
+          request.query,
+          'semantic',
+          'exact',
+          `no exact matches${emptyCount > 1 ? ` after ${emptyCount} attempts` : ''}`,
+        ),
+        request.query,
+        intent,
+        ['exact', 'semantic-fallback'],
       );
-      if (semanticResults.length > 0) {
-        results = this.finalizeResults(semanticResults.map(result => ({
-          ...result,
-          matchReason: `Repeated exact miss for "${request.query}". Showing semantic fallback results instead.`,
-        })), request.query, intent, ['exact', 'semantic-fallback']);
-        this.storeCachedResults(cacheKey, results);
-        return results;
-      }
+      this.storeCachedResults(cacheKey, results);
+      return results;
     }
 
     return [];
@@ -289,6 +290,26 @@ export class SearchService {
     return this.buildCacheKey(request, limit);
   }
 
+  private markFallbackResults(
+    results: SearchResult[],
+    originalQuery: string,
+    mode: SearchFallback['mode'],
+    from: SearchFallback['from'],
+    reason: string,
+  ): SearchResult[] {
+    return results.map(result => ({
+      ...result,
+      matchReason: `Fallback ${mode} results for "${originalQuery}" (${reason}).`,
+      fallback: {
+        originalQuery,
+        mode,
+        from,
+        reason,
+      },
+      suggestedNextConfidence: downgradeConfidence(result.suggestedNextConfidence, mode),
+    }));
+  }
+
   private storeCachedResults(cacheKey: string, results: SearchResult[]): void {
     this.resultCache.set(cacheKey, results.map(result => ({ ...result })));
   }
@@ -303,14 +324,14 @@ export class SearchService {
     return Math.max(limit, limit * candidateMultiplier);
   }
 
-  private finalizeResults(
+  private async finalizeResults(
     results: SearchResult[],
     query: string,
     intent: SearchResult['searchIntent'],
     fallbackPath: string[],
     rerankUsed?: boolean,
-  ): SearchResult[] {
-    const clustered = clusterResults(results);
+  ): Promise<SearchResult[]> {
+    const clustered = await this.attachMemoryHints(clusterResults(results));
     const topConfidence = clustered[0]?.suggestedNextConfidence;
     const finalResults = clustered.map(result => ({
       ...result,
@@ -322,8 +343,31 @@ export class SearchService {
         topConfidence,
       },
     }));
-    this.logger?.info(`[search] q="${query}" path="${fallbackPath.join(' > ')}" intent=${intent} count=${finalResults.length} rerank=${rerankUsed === true ? 'yes' : rerankUsed === false ? 'no' : 'n/a'} topConfidence=${topConfidence ?? 'n/a'}`);
+    this.logger?.debug(`[search] q="${query}" path="${fallbackPath.join(' > ')}" intent=${intent} count=${finalResults.length} rerank=${rerankUsed === true ? 'yes' : rerankUsed === false ? 'no' : 'n/a'} topConfidence=${topConfidence ?? 'n/a'}`);
     return finalResults;
+  }
+
+  private async attachMemoryHints(results: SearchResult[]): Promise<SearchResult[]> {
+    if (!this.memoryStore) {
+      return results;
+    }
+
+    return Promise.all(results.map(async (result) => {
+      const symbolId = buildSearchResultSymbolId(result);
+      if (symbolId) {
+        const symbolMemories = await this.memoryStore?.listBySymbol(symbolId);
+        if (symbolMemories && symbolMemories.length > 0) {
+          return { ...result, memoryHint: symbolMemories[0].text };
+        }
+      }
+      if (result.file) {
+        const fileMemories = await this.memoryStore?.listByFile(result.file);
+        if (fileMemories && fileMemories.length > 0) {
+          return { ...result, memoryHint: fileMemories[0].text };
+        }
+      }
+      return result;
+    }));
   }
 }
 
@@ -390,13 +434,27 @@ function clusterResults(results: SearchResult[]): SearchResult[] {
   return [...clustered, ...memories];
 }
 
-function escapeRegex(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function normalizeCandidateMultiplier(value?: number): number {
   if (!Number.isFinite(value)) {
     return 3;
   }
   return Math.max(1, Math.floor(value as number));
+}
+
+function downgradeConfidence(value: number | undefined, mode: SearchFallback['mode']): number | undefined {
+  if (value === undefined) {
+    return value;
+  }
+  const penalty = mode === 'normalized-exact' ? 0.08 : 0.2;
+  return Math.max(0.1, Number((value - penalty).toFixed(2)));
+}
+
+function buildSearchResultSymbolId(result: SearchResult): string | undefined {
+  if (!result.file || !result.loc || (result.type !== 'method' && result.type !== 'class')) {
+    return undefined;
+  }
+  const display = result.type === 'method'
+    ? (result.class ? `${result.class}#${result.method}` : result.method)
+    : result.class;
+  return `${result.file}:${result.loc}:${result.type}:${display ?? ''}`;
 }

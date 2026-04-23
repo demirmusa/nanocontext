@@ -125,6 +125,31 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
     },
   },
   {
+    name: 'symbol',
+    description: 'Resolve a symbol name to ranked candidates.',
+    params: '`query`',
+    docsDescription: 'Resolve a symbol name, qualified name, or `Type#Member` target.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Symbol query' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'files',
+    description: 'List indexed files or search them by partial name.',
+    params: '`query?`',
+    docsDescription: 'List indexed files or search them by partial name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Optional partial filename query' },
+      },
+    },
+  },
+  {
     name: 'deps',
     description: 'Get call references of a method.',
     params: '`f`, `m`, `d?`',
@@ -167,6 +192,19 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
     },
   },
   {
+    name: 'callees',
+    description: 'Get likely outbound calls for a symbol.',
+    params: '`symbol`',
+    docsDescription: 'Find likely direct callees for a symbol.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Method or symbol selector' },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
     name: 'trace',
     description: 'Trace a likely call chain for a symbol.',
     params: '`symbol`, `d?`',
@@ -195,14 +233,15 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   {
     name: 'remember',
     description: 'Save a note to project memory.',
-    params: '`text`, `ref?`, `file?`',
-    docsDescription: 'Save a note to project memory, optionally scoped to a file.',
+    params: '`text`, `ref?`, `file?`, `symbol?`',
+    docsDescription: 'Save a note to project memory, optionally scoped to a file or symbol.',
     inputSchema: {
       type: 'object',
       properties: {
         text: { type: 'string', description: 'Note text' },
         ref: { type: 'string', description: 'Optional reference' },
         file: { type: 'string', description: 'Optional file path' },
+        symbol: { type: 'string', description: 'Optional symbol query' },
       },
       required: ['text'],
     },
@@ -210,13 +249,14 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   {
     name: 'memories',
     description: 'List project memories.',
-    params: '`q?`, `file?`, `id?`',
-    docsDescription: 'List memories. `file` limits results to one file. `id=true` includes IDs.',
+    params: '`q?`, `file?`, `symbol?`, `id?`',
+    docsDescription: 'List memories. `file` limits results to one file, `symbol` to one symbol. `id=true` includes IDs.',
     inputSchema: {
       type: 'object',
       properties: {
         q: { type: 'string', description: 'Filter query' },
         file: { type: 'string', description: 'Only show memories for one file' },
+        symbol: { type: 'string', description: 'Only show memories for one symbol' },
         id: { type: 'boolean', description: 'Include memory IDs (for forget)' },
       },
     },

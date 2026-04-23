@@ -4,12 +4,9 @@ export class SearchFormatter {
   static formatCompact(results: SearchResult[]): string {
     const grouped = new Map<string, SearchResult[]>();
     const memories: SearchResult[] = [];
-    const notes = new Set<string>();
+    const fallback = results[0]?.fallback;
 
     for (const r of results) {
-      if (r.matchReason) {
-        notes.add(r.matchReason);
-      }
       if (r.type === 'memory') {
         memories.push(r);
         continue;
@@ -20,11 +17,8 @@ export class SearchFormatter {
     }
 
     const lines: string[] = [];
-
-    for (const note of notes) {
-      lines.push(`note: ${note}`);
-    }
-    if (notes.size > 0) {
+    if (fallback) {
+      lines.push(`fallback: ${fallback.mode} from ${fallback.from} for "${fallback.originalQuery}" (${fallback.reason})`);
       lines.push('');
     }
 
@@ -33,11 +27,17 @@ export class SearchFormatter {
       for (const m of methods) {
         const params = m.sig ? SearchFormatter.extractParams(m.sig) : '';
         lines.push(`  ${m.method || m.class}(${params})[${m.loc}]`);
+        if (m.matchReason && !fallback) {
+          lines.push(`    note: ${m.matchReason}`);
+        }
         if (m.suggestedNext) {
           lines.push(`    next: ${m.suggestedNext}`);
         }
         if (m.related?.length) {
           lines.push(`    related: ${m.related.map(item => `${item.method || item.class}[${item.loc}]`).join(', ')}`);
+        }
+        if (m.memoryHint) {
+          lines.push(`    memory: ${m.memoryHint}`);
         }
       }
       lines.push('');
@@ -73,6 +73,8 @@ export class SearchFormatter {
         suggestedNext: r.suggestedNext,
         suggestedNextReason: r.suggestedNextReason,
         suggestedNextConfidence: r.suggestedNextConfidence,
+        fallback: r.fallback,
+        memoryHint: r.memoryHint,
         related: r.related,
         searchIntent: r.searchIntent,
         searchTelemetry: r.searchTelemetry,

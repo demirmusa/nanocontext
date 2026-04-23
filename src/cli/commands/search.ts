@@ -2,7 +2,7 @@ import { Container } from '../../core/Container';
 import { SearchFormatter } from '../../core/search/SearchFormatter';
 import { colors } from '../utils/colors';
 
-export async function searchCommand(query: string, options: { deep?: boolean; exact?: boolean; vector?: boolean; regex?: boolean; limit?: string }): Promise<void> {
+export async function searchCommand(query: string | undefined, options: { query?: string[]; deep?: boolean; exact?: boolean; vector?: boolean; regex?: boolean; limit?: string }): Promise<void> {
   const container = new Container();
 
   if (!container.configManager.isInitialized()) {
@@ -14,31 +14,26 @@ export async function searchCommand(query: string, options: { deep?: boolean; ex
     await container.initialize();
 
     const limit = parseInt(options.limit || '3', 10);
+    const queries = collectQueries(query, options.query);
+    if (queries.length === 0) {
+      console.error(colors.red('Provide a query or repeat `--query`.'));
+      process.exit(1);
+    }
 
-    if (options.regex) {
+    for (const [index, currentQuery] of queries.entries()) {
       const results = await container.searchService.execute({
-        mode: 'regex',
-        query,
+        mode: options.regex ? 'regex' : options.vector ? 'vector' : 'exact',
+        query: currentQuery,
         limit,
         deep: options.deep,
+        typeFilter: options.vector ? 'all' : undefined,
       });
-      console.log(options.deep ? SearchFormatter.formatDetailed(results) : SearchFormatter.formatCompact(results));
-    } else if (options.vector) {
-      const results = await container.searchService.execute({
-        mode: 'vector',
-        query,
-        limit,
-        deep: options.deep,
-        typeFilter: 'all',
-      });
-      console.log(options.deep ? SearchFormatter.formatDetailed(results) : SearchFormatter.formatCompact(results));
-    } else {
-      const results = await container.searchService.execute({
-        mode: 'exact',
-        query,
-        limit,
-        deep: options.deep,
-      });
+      if (queries.length > 1) {
+        if (index > 0) {
+          console.log('');
+        }
+        console.log(colors.bold(`Query: ${currentQuery}`));
+      }
       console.log(options.deep ? SearchFormatter.formatDetailed(results) : SearchFormatter.formatCompact(results));
     }
   } catch (err) {
@@ -47,4 +42,12 @@ export async function searchCommand(query: string, options: { deep?: boolean; ex
   } finally {
     await container.dispose();
   }
+}
+
+function collectQueries(query: string | undefined, batchQueries?: string[]): string[] {
+  const values = [
+    ...(query ? [query] : []),
+    ...(batchQueries ?? []),
+  ].map(item => item.trim()).filter(Boolean);
+  return [...new Set(values)];
 }

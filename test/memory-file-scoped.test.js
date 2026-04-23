@@ -27,13 +27,14 @@ test('memory service normalizes file-scoped remember and list calls', async () =
       close: () => {},
     },
     createConfigManager(),
+    { resolveSymbolTarget: async (query) => ({ query, candidates: [] }) },
   );
 
   const saved = await service.remember('Auth note', undefined, 'src\\auth\\AuthService.cs');
   const listed = await service.list('Auth', 'src\\auth\\AuthService.cs');
 
   assert.deepEqual(addArgs, ['Auth note', undefined, 'src/auth/AuthService.cs', 'file']);
-  assert.deepEqual(listArgs, ['Auth', 'src/auth/AuthService.cs']);
+  assert.deepEqual(listArgs, ['Auth', 'src/auth/AuthService.cs', undefined]);
   assert.equal(saved.file, 'src/auth/AuthService.cs');
   assert.equal(listed[0].scope, 'file');
 });

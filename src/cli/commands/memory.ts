@@ -2,7 +2,7 @@ import { confirm } from '@inquirer/prompts';
 import { Container } from '../../core/Container';
 import { colors } from '../utils/colors';
 
-export async function rememberCommand(text: string, options: { ref?: string; file?: string }): Promise<void> {
+export async function rememberCommand(text: string, options: { ref?: string; file?: string; symbol?: string }): Promise<void> {
   const container = new Container();
   if (!container.configManager.isInitialized()) {
     console.log(colors.red('Project not initialized. Run `nc init` first.'));
@@ -11,8 +11,12 @@ export async function rememberCommand(text: string, options: { ref?: string; fil
 
   try {
     await container.initialize();
-    const memory = await container.memoryService.remember(text, options.ref, options.file);
-    const scopeLabel = memory.scope === 'file' && memory.file ? `file:${memory.file}` : 'project';
+    const memory = await container.memoryService.remember(text, options.ref, options.file, options.symbol);
+    const scopeLabel = memory.scope === 'symbol' && memory.symbol
+      ? `symbol:${memory.symbol}`
+      : memory.scope === 'file' && memory.file
+        ? `file:${memory.file}`
+        : 'project';
     console.log(colors.green(`✓ Saved to memory (${memory.id}) ${colors.dim(`[${scopeLabel}]`)}`));
 
     // Check for similar existing memories and warn
@@ -22,7 +26,7 @@ export async function rememberCommand(text: string, options: { ref?: string; fil
       if (others.length > 0) {
         console.log(colors.yellow(`\nNote: ${others.length} similar memor${others.length === 1 ? 'y' : 'ies'} found:`));
         for (const m of others.slice(0, 3)) {
-          console.log(`  ${colors.dim(m.id)}  ${m.text}${m.file ? colors.dim(` (${m.file})`) : ''}`);
+          console.log(`  ${colors.dim(m.id)}  ${m.text}${formatMemoryScope(m)}`);
         }
       }
     } catch {
@@ -36,7 +40,7 @@ export async function rememberCommand(text: string, options: { ref?: string; fil
   }
 }
 
-export async function memoriesCommand(options: { search?: string; file?: string }): Promise<void> {
+export async function memoriesCommand(options: { search?: string; file?: string; symbol?: string }): Promise<void> {
   const container = new Container();
   if (!container.configManager.isInitialized()) {
     console.log(colors.red('Project not initialized. Run `nc init` first.'));
@@ -45,7 +49,7 @@ export async function memoriesCommand(options: { search?: string; file?: string 
 
   try {
     await container.initialize();
-    const memories = await container.memoryService.list(options.search, options.file);
+    const memories = await container.memoryService.list(options.search, options.file, options.symbol);
 
     if (memories.length === 0) {
       console.log(colors.dim('No memories found.'));
@@ -54,8 +58,7 @@ export async function memoriesCommand(options: { search?: string; file?: string 
 
     for (const m of memories) {
       const date = m.createdAt.split('T')[0];
-      const scope = m.file ? colors.dim(` ${m.file}`) : '';
-      console.log(`  ${colors.cyan(m.id)}  ${colors.dim(date)}  ${m.text}${scope}`);
+      console.log(`  ${colors.cyan(m.id)}  ${colors.dim(date)}  ${m.text}${formatMemoryScope(m)}`);
     }
   } catch (err) {
     console.error(colors.red(`Failed: ${err}`));
@@ -63,6 +66,16 @@ export async function memoriesCommand(options: { search?: string; file?: string 
   } finally {
     await container.dispose();
   }
+}
+
+function formatMemoryScope(memory: { symbol?: string; file?: string }): string {
+  if (memory.symbol) {
+    return colors.dim(` (${memory.symbol}${memory.file ? ` @ ${memory.file}` : ''})`);
+  }
+  if (memory.file) {
+    return colors.dim(` (${memory.file})`);
+  }
+  return '';
 }
 
 export async function forgetCommand(id: string | undefined, options: { before?: string }): Promise<void> {

@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const { OpenAILLMProvider } = require('../dist/core/llm/providers/OpenAILLMProvider');
 const { SearchService } = require('../dist/core/services/SearchService');
 const { CodeReadService } = require('../dist/core/services/CodeReadService');
+const { MemoryService } = require('../dist/core/services/MemoryService');
+const { SearchFormatter } = require('../dist/core/search/SearchFormatter');
 const { createTempProject } = require('./helpers/project');
 
 function createConfigManager(projectRoot) {
@@ -104,9 +106,10 @@ test('search service normalizes exact misses and attaches suggested next actions
 
   const [result] = await service.execute({ mode: 'exact', query: 'QueryAsync<T>' });
 
-  assert.equal(result.matchReason.includes('QueryAsync<T>'), true);
+  assert.equal(result.fallback.mode, 'normalized-exact');
+  assert.equal(result.fallback.originalQuery, 'QueryAsync<T>');
   assert.equal(result.suggestedNext, 'nc get Dapper/SqlMapper.Async.cs[414-483]');
-  assert.equal(result.suggestedNextConfidence, 0.95);
+  assert.equal(result.suggestedNextConfidence, 0.87);
 });
 
 test('search service caches repeated vector requests and only hits the backend once', async () => {
@@ -131,7 +134,7 @@ test('search service caches repeated vector requests and only hits the backend o
   assert.equal(calls, 1);
 });
 
-test('search service escalates repeated empty exact misses to semantic fallback', async () => {
+test('search service deterministically falls back to semantic search after exact misses', async () => {
   let semanticCalls = 0;
   const service = new SearchService(
     {
@@ -148,11 +151,11 @@ test('search service escalates repeated empty exact misses to semantic fallback'
   );
 
   const first = await service.execute({ mode: 'exact', query: 'FindUser<T>' });
-  const second = await service.execute({ mode: 'exact', query: 'FindUser<T>' });
 
-  assert.equal(first.length, 0);
-  assert.equal(second.length, 1);
-  assert.equal(second[0].matchReason.includes('Repeated exact miss'), true);
+  assert.equal(first.length, 1);
+  assert.equal(first[0].fallback.mode, 'semantic');
+  assert.equal(first[0].fallback.from, 'exact');
+  assert.equal(first[0].fallback.reason.includes('no exact matches'), true);
   assert.equal(semanticCalls, 1);
 });
 
@@ -230,6 +233,83 @@ test('code read service resolves file-scoped and indexed symbol targets', async 
   const indexed = await codeReadService.readSymbolSnippet('AuthService.BuildToken');
   assert.equal(indexed.target.sig, 'string BuildToken()');
   assert.match(indexed.snippet.content, /BuildToken/);
+
+  const resolution = await codeReadService.resolveSymbolTarget('AuthService.BuildToken');
+  assert.equal(resolution.matched.display, 'AuthService#BuildToken');
+  assert.equal(resolution.matched.matchType, 'qualified');
+});
+
+test('code read service reports ambiguity for short symbol queries', async () => {
+  const projectRoot = createTempProject({
+    'src/auth/AuthService.cs': 'public class AuthService { public string BuildToken() { return "token"; } }',
+    'src/user/UserService.cs': 'public class UserService { public string BuildToken() { return "user"; } }',
+  });
+
+  const headers = {
+    'src/auth/AuthService.cs': {
+      file: 'src/auth/AuthService.cs',
+      lang: 'csharp',
+      checksum: 'checksum-a',
+      imports: [],
+      exports: [],
+      classes: [{ id: 'class:auth', name: 'AuthService', loc: '1-1' }],
+      methods: [{ id: 'method:a', name: 'BuildToken', class: 'AuthService', loc: '1-1', sig: 'string BuildToken()', refs: [] }],
+    },
+    'src/user/UserService.cs': {
+      file: 'src/user/UserService.cs',
+      lang: 'csharp',
+      checksum: 'checksum-b',
+      imports: [],
+      exports: [],
+      classes: [{ id: 'class:user', name: 'UserService', loc: '1-1' }],
+      methods: [{ id: 'method:b', name: 'BuildToken', class: 'UserService', loc: '1-1', sig: 'string BuildToken()', refs: [] }],
+    },
+  };
+
+  const codeReadService = new CodeReadService(
+    createConfigManager(projectRoot),
+    {
+      read: async (file) => headers[file] ?? null,
+      write: async () => {},
+      remove: async () => {},
+      exists: () => true,
+      getHeaderPath: () => '',
+    },
+    {
+      initialize: async () => {},
+      getChecksum: () => null,
+      listTrackedFiles: () => [],
+      setChecksum: () => {},
+      removeFile: () => {},
+      enqueueInsight: () => {},
+      dequeueInsight: () => [],
+      completeInsight: () => {},
+      failInsight: () => {},
+      getPendingInsightCount: () => 0,
+      isInsightPending: () => false,
+      indexMethod: () => {},
+      indexClass: () => {},
+      removeFileIndex: () => {},
+      searchExact: (query) => query === 'BuildToken'
+        ? [
+          { type: 'method', file: 'src/auth/AuthService.cs', method: 'BuildToken', class: 'AuthService', loc: '1-1', sig: 'string BuildToken()' },
+          { type: 'method', file: 'src/user/UserService.cs', method: 'BuildToken', class: 'UserService', loc: '1-1', sig: 'string BuildToken()' },
+        ]
+        : [],
+      searchRegex: () => [],
+      getStats: () => ({ totalFiles: 0, totalMethods: 0, lastScanAt: null }),
+      setLastScanAt: () => {},
+      setTotalMethods: () => {},
+      clearAll: () => {},
+      close: () => {},
+    },
+    createMemoryStore(),
+  );
+
+  const resolution = await codeReadService.resolveSymbolTarget('BuildToken');
+  assert.equal(resolution.ambiguous, true);
+  assert.equal(resolution.candidates.length, 2);
+  await assert.rejects(() => codeReadService.openTarget('BuildToken'), /Ambiguous symbol target/);
 });
 
 test('code read service exposes peek and open previews with different context sizes', async () => {
@@ -310,7 +390,71 @@ test('code read service exposes peek and open previews with different context si
   assert.equal(classOpen.target.loc, '5-13');
   assert.equal(aroundSnippet.target.loc, '4-10');
   assert.equal(open.memories.length, 1);
+  assert.equal(open.memories[0].text, 'Auth file note');
   assert.ok(open.snippet.content.length >= peek.snippet.content.length);
+});
+
+test('code read service prefers symbol memories over file memories', async () => {
+  const projectRoot = createTempProject({
+    'src/auth/AuthService.cs': [
+      'public class AuthService {',
+      '  public string BuildToken() {',
+      '    return "token";',
+      '  }',
+      '}',
+    ].join('\n'),
+  });
+
+  const header = {
+    file: 'src/auth/AuthService.cs',
+    lang: 'csharp',
+    checksum: 'checksum',
+    imports: [],
+    exports: [],
+    classes: [{ id: 'class:auth', name: 'AuthService', loc: '1-5' }],
+    methods: [{ id: 'method:token', name: 'BuildToken', class: 'AuthService', loc: '2-4', sig: 'string BuildToken()', refs: [] }],
+  };
+
+  const codeReadService = new CodeReadService(
+    createConfigManager(projectRoot),
+    {
+      read: async () => header,
+      write: async () => {},
+      remove: async () => {},
+      exists: () => true,
+      getHeaderPath: () => '',
+    },
+    {
+      initialize: async () => {},
+      getChecksum: () => null,
+      listTrackedFiles: () => [],
+      setChecksum: () => {},
+      removeFile: () => {},
+      enqueueInsight: () => {},
+      dequeueInsight: () => [],
+      completeInsight: () => {},
+      failInsight: () => {},
+      getPendingInsightCount: () => 0,
+      isInsightPending: () => false,
+      indexMethod: () => {},
+      indexClass: () => {},
+      removeFileIndex: () => {},
+      searchExact: () => [{ type: 'method', file: 'src/auth/AuthService.cs', method: 'BuildToken', class: 'AuthService', loc: '2-4', sig: 'string BuildToken()' }],
+      searchRegex: () => [],
+      getStats: () => ({ totalFiles: 0, totalMethods: 0, lastScanAt: null }),
+      setLastScanAt: () => {},
+      setTotalMethods: () => {},
+      clearAll: () => {},
+      close: () => {},
+    },
+    createMemoryStore({
+      listBySymbol: async () => [{ id: 'mem_symbol', text: 'Method note', createdAt: '2026-01-01T00:00:00.000Z', symbol: 'AuthService#BuildToken', symbolId: 'src/auth/AuthService.cs:2-4:method:AuthService#BuildToken', scope: 'symbol' }],
+      listByFile: async () => [{ id: 'mem_file', text: 'File note', createdAt: '2026-01-01T00:00:00.000Z', file: 'src/auth/AuthService.cs', scope: 'file' }],
+    }),
+  );
+
+  const open = await codeReadService.openTarget('AuthService.BuildToken');
+  assert.equal(open.memories[0].text, 'Method note');
 });
 
 test('search service routes natural-language queries through vector search and emits telemetry', async () => {
@@ -335,6 +479,119 @@ test('search service routes natural-language queries through vector search and e
   assert.equal(vectorCalls, 1);
   assert.equal(result.searchIntent, 'semantic');
   assert.deepEqual(result.searchTelemetry.fallbackPath, ['intent:semantic', 'vector']);
+});
+
+test('search formatter prints compact fallback headings before grouped hits', () => {
+  const output = SearchFormatter.formatCompact([
+    {
+      type: 'method',
+      file: 'src/auth.ts',
+      method: 'findUser',
+      loc: '30-40',
+      sig: 'findUser(id)',
+      fallback: {
+        originalQuery: 'FindUser<T>',
+        mode: 'semantic',
+        from: 'exact',
+        reason: 'no exact matches',
+      },
+      suggestedNext: 'nc get src/auth.ts[22-48]',
+    },
+  ]);
+
+  assert.match(output, /fallback: semantic from exact for "FindUser<T>" \(no exact matches\)/);
+  assert.match(output, /src\/auth\.ts/);
+});
+
+test('memory service stores and lists symbol-scoped notes', async () => {
+  const calls = [];
+  const memoryService = new MemoryService(
+    {
+      add: async (...args) => {
+        calls.push(args);
+        return { id: 'mem_symbol', text: args[0], createdAt: '2026-01-01T00:00:00.000Z', file: 'src/auth/AuthService.cs', symbol: 'AuthService#BuildToken', symbolId: 'src/auth/AuthService.cs:6-8:method:AuthService#BuildToken', scope: 'symbol' };
+      },
+      list: async (_search, _file, symbolId) => [{ id: 'mem_symbol', text: 'note', createdAt: '2026-01-01T00:00:00.000Z', symbolId, symbol: 'AuthService#BuildToken', file: 'src/auth/AuthService.cs', scope: 'symbol' }],
+      listByFile: async () => [],
+      listBySymbol: async (symbolId) => [{ id: 'mem_symbol', text: 'note', createdAt: '2026-01-01T00:00:00.000Z', symbolId, symbol: 'AuthService#BuildToken', file: 'src/auth/AuthService.cs', scope: 'symbol' }],
+      remove: async () => false,
+      removeBefore: async () => 0,
+      findSimilar: async () => [],
+      close: () => {},
+    },
+    createSearchConfigManager(),
+    {
+      resolveSymbolTarget: async () => ({
+        query: 'AuthService#BuildToken',
+        matched: {
+          file: 'src/auth/AuthService.cs',
+          symbol: 'AuthService#BuildToken',
+          display: 'AuthService#BuildToken',
+          loc: '6-8',
+          sig: 'string BuildToken()',
+          type: 'method',
+          matchType: 'qualified',
+          confidence: 'high',
+        },
+        candidates: [],
+      }),
+    },
+  );
+
+  const saved = await memoryService.remember('note', undefined, undefined, 'AuthService#BuildToken');
+  const listed = await memoryService.list(undefined, undefined, 'AuthService#BuildToken');
+
+  assert.equal(saved.scope, 'symbol');
+  assert.equal(calls[0][3], 'symbol');
+  assert.equal(calls[0][4], 'AuthService#BuildToken');
+  assert.equal(listed[0].symbol, 'AuthService#BuildToken');
+});
+
+test('search service attaches symbol memory hints to matching results', async () => {
+  const service = new SearchService(
+    {
+      search: async () => [],
+      searchDeep: async () => [],
+      searchExact: () => [{ type: 'method', file: 'src/auth.ts', class: 'AuthService', method: 'BuildToken', loc: '10-14', sig: 'BuildToken()' }],
+      searchRegex: () => [],
+      searchRegexDeep: async () => [],
+    },
+    createSearchConfigManager(),
+    null,
+    undefined,
+    createMemoryStore({
+      listBySymbol: async () => [{ id: 'mem_symbol', text: 'Symbol note', createdAt: '2026-01-01T00:00:00.000Z', symbol: 'AuthService#BuildToken', symbolId: 'src/auth.ts:10-14:method:AuthService#BuildToken', scope: 'symbol' }],
+      listByFile: async () => [{ id: 'mem_file', text: 'File note', createdAt: '2026-01-01T00:00:00.000Z', file: 'src/auth.ts', scope: 'file' }],
+    }),
+  );
+
+  const [result] = await service.execute({ mode: 'exact', query: 'AuthService.BuildToken' });
+  assert.equal(result.memoryHint, 'Symbol note');
+});
+
+test('search service emits search telemetry through debug logging instead of info', async () => {
+  const messages = [];
+  const service = new SearchService(
+    {
+      search: async () => [],
+      searchDeep: async () => [],
+      searchExact: () => [{ type: 'method', file: 'src/auth.ts', class: 'AuthService', method: 'BuildToken', loc: '10-14', sig: 'BuildToken()' }],
+      searchRegex: () => [],
+      searchRegexDeep: async () => [],
+    },
+    createSearchConfigManager(),
+    null,
+    {
+      info(message) { messages.push(['info', message]); },
+      warn() {},
+      error() {},
+      debug(message) { messages.push(['debug', message]); },
+    },
+  );
+
+  await service.execute({ mode: 'exact', query: 'AuthService.BuildToken' });
+  assert.equal(messages.some(([level]) => level === 'info'), false);
+  assert.equal(messages.some(([level, message]) => level === 'debug' && String(message).includes('[search]')), true);
 });
 
 test('search service clusters related file-local hits under one primary result', async () => {

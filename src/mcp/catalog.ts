@@ -140,6 +140,47 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
     },
   },
   {
+    name: 'refs',
+    description: 'Get direct refs/callees for a symbol.',
+    params: '`symbol`, `d?`',
+    docsDescription: 'Walk direct refs for a symbol.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Method or symbol selector' },
+        d: { type: 'number', description: 'Depth' },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'callers',
+    description: 'Get likely inbound references for a symbol.',
+    params: '`symbol`',
+    docsDescription: 'Find likely callers for a symbol.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Method or symbol selector' },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'trace',
+    description: 'Trace a likely call chain for a symbol.',
+    params: '`symbol`, `d?`',
+    docsDescription: 'Trace a likely execution chain for a symbol.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Method or symbol selector' },
+        d: { type: 'number', description: 'Depth' },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
     name: 'scan',
     description: 'Scan project or a specific file.',
     params: '`f?`',
@@ -154,13 +195,14 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   {
     name: 'remember',
     description: 'Save a note to project memory.',
-    params: '`text`, `ref?`',
-    docsDescription: 'Save a note to project memory.',
+    params: '`text`, `ref?`, `file?`',
+    docsDescription: 'Save a note to project memory, optionally scoped to a file.',
     inputSchema: {
       type: 'object',
       properties: {
         text: { type: 'string', description: 'Note text' },
         ref: { type: 'string', description: 'Optional reference' },
+        file: { type: 'string', description: 'Optional file path' },
       },
       required: ['text'],
     },
@@ -168,12 +210,13 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   {
     name: 'memories',
     description: 'List project memories.',
-    params: '`q?`, `id?`',
-    docsDescription: 'List memories. `id=true` to include IDs (for forget).',
+    params: '`q?`, `file?`, `id?`',
+    docsDescription: 'List memories. `file` limits results to one file. `id=true` includes IDs.',
     inputSchema: {
       type: 'object',
       properties: {
         q: { type: 'string', description: 'Filter query' },
+        file: { type: 'string', description: 'Only show memories for one file' },
         id: { type: 'boolean', description: 'Include memory IDs (for forget)' },
       },
     },

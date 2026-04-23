@@ -27,18 +27,21 @@ export class MemoryStore implements IMemoryStore {
         id TEXT PRIMARY KEY,
         text TEXT NOT NULL,
         ref TEXT,
+        file TEXT,
+        scope TEXT DEFAULT 'project',
         created_at TEXT DEFAULT (datetime('now'))
       );
     `);
+    this.migrateSchema();
   }
 
-  async add(text: string, ref?: string): Promise<MemoryRecord> {
+  async add(text: string, ref?: string, file?: string, scope: 'project' | 'file' = 'project'): Promise<MemoryRecord> {
     const id = 'mem_' + crypto.randomBytes(3).toString('hex');
     const createdAt = new Date().toISOString();
 
     this.db.prepare(
-      'INSERT INTO memories (id, text, ref, created_at) VALUES (?, ?, ?, ?)'
-    ).run(id, text, ref || null, createdAt);
+      'INSERT INTO memories (id, text, ref, file, scope, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(id, text, ref || null, file || null, scope, createdAt);
 
     // Add to vector store if available
     if (this.vectorStore && this.embeddingProvider) {
@@ -48,7 +51,7 @@ export class MemoryStore implements IMemoryStore {
           id: `memory::${id}`,
           vector,
           type: 'memory',
-          file: '',
+          file: file || ref || '',
           text,
         }]);
       } catch {
@@ -56,19 +59,27 @@ export class MemoryStore implements IMemoryStore {
       }
     }
 
-    return { id, text, createdAt, ref };
+    return { id, text, createdAt, ref, file, scope };
   }
 
-  async list(search?: string): Promise<MemoryRecord[]> {
+  async list(search?: string, file?: string): Promise<MemoryRecord[]> {
     let rows;
-    if (search) {
+    if (search && file) {
       rows = this.db.prepare(
-        'SELECT id, text, ref, created_at FROM memories WHERE text LIKE ? ORDER BY created_at DESC'
-      ).all(`%${search}%`) as Array<{ id: string; text: string; ref: string | null; created_at: string }>;
+        'SELECT id, text, ref, file, scope, created_at FROM memories WHERE (text LIKE ? OR file LIKE ?) AND file = ? ORDER BY created_at DESC'
+      ).all(`%${search}%`, `%${search}%`, file) as Array<{ id: string; text: string; ref: string | null; file: string | null; scope: string | null; created_at: string }>;
+    } else if (search) {
+      rows = this.db.prepare(
+        'SELECT id, text, ref, file, scope, created_at FROM memories WHERE text LIKE ? OR file LIKE ? ORDER BY created_at DESC'
+      ).all(`%${search}%`, `%${search}%`) as Array<{ id: string; text: string; ref: string | null; file: string | null; scope: string | null; created_at: string }>;
+    } else if (file) {
+      rows = this.db.prepare(
+        'SELECT id, text, ref, file, scope, created_at FROM memories WHERE file = ? ORDER BY created_at DESC'
+      ).all(file) as Array<{ id: string; text: string; ref: string | null; file: string | null; scope: string | null; created_at: string }>;
     } else {
       rows = this.db.prepare(
-        'SELECT id, text, ref, created_at FROM memories ORDER BY created_at DESC'
-      ).all() as Array<{ id: string; text: string; ref: string | null; created_at: string }>;
+        'SELECT id, text, ref, file, scope, created_at FROM memories ORDER BY created_at DESC'
+      ).all() as Array<{ id: string; text: string; ref: string | null; file: string | null; scope: string | null; created_at: string }>;
     }
 
     return rows.map(r => ({
@@ -76,7 +87,13 @@ export class MemoryStore implements IMemoryStore {
       text: r.text,
       createdAt: r.created_at,
       ref: r.ref || undefined,
+      file: r.file || undefined,
+      scope: (r.scope as 'project' | 'file' | null) ?? undefined,
     }));
+  }
+
+  async listByFile(file: string): Promise<MemoryRecord[]> {
+    return this.list(undefined, file);
   }
 
   async remove(id: string): Promise<boolean> {
@@ -116,8 +133,8 @@ export class MemoryStore implements IMemoryStore {
       for (const r of results) {
         if (r.text && (!threshold || (r.score !== undefined && r.score <= threshold))) {
           const rows = this.db.prepare(
-            'SELECT id, text, ref, created_at FROM memories WHERE text = ?'
-          ).all(r.text) as Array<{ id: string; text: string; ref: string | null; created_at: string }>;
+            'SELECT id, text, ref, file, scope, created_at FROM memories WHERE text = ?'
+          ).all(r.text) as Array<{ id: string; text: string; ref: string | null; file: string | null; scope: string | null; created_at: string }>;
 
           for (const row of rows) {
             memories.push({
@@ -125,6 +142,8 @@ export class MemoryStore implements IMemoryStore {
               text: row.text,
               createdAt: row.created_at,
               ref: row.ref || undefined,
+              file: row.file || undefined,
+              scope: (row.scope as 'project' | 'file' | null) ?? undefined,
             });
           }
         }
@@ -137,5 +156,15 @@ export class MemoryStore implements IMemoryStore {
 
   close(): void {
     this.db.close();
+  }
+
+  private migrateSchema(): void {
+    const columns = this.db.prepare("PRAGMA table_info('memories')").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === 'file')) {
+      this.db.exec("ALTER TABLE memories ADD COLUMN file TEXT");
+    }
+    if (!columns.some(column => column.name === 'scope')) {
+      this.db.exec("ALTER TABLE memories ADD COLUMN scope TEXT DEFAULT 'project'");
+    }
   }
 }

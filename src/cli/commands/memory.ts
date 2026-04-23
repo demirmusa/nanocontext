@@ -2,7 +2,7 @@ import { confirm } from '@inquirer/prompts';
 import { Container } from '../../core/Container';
 import { colors } from '../utils/colors';
 
-export async function rememberCommand(text: string, options: { ref?: string }): Promise<void> {
+export async function rememberCommand(text: string, options: { ref?: string; file?: string }): Promise<void> {
   const container = new Container();
   if (!container.configManager.isInitialized()) {
     console.log(colors.red('Project not initialized. Run `nc init` first.'));
@@ -11,8 +11,9 @@ export async function rememberCommand(text: string, options: { ref?: string }): 
 
   try {
     await container.initialize();
-    const memory = await container.memoryService.remember(text, options.ref);
-    console.log(colors.green(`✓ Saved to memory (${memory.id})`));
+    const memory = await container.memoryService.remember(text, options.ref, options.file);
+    const scopeLabel = memory.scope === 'file' && memory.file ? `file:${memory.file}` : 'project';
+    console.log(colors.green(`✓ Saved to memory (${memory.id}) ${colors.dim(`[${scopeLabel}]`)}`));
 
     // Check for similar existing memories and warn
     try {
@@ -21,7 +22,7 @@ export async function rememberCommand(text: string, options: { ref?: string }): 
       if (others.length > 0) {
         console.log(colors.yellow(`\nNote: ${others.length} similar memor${others.length === 1 ? 'y' : 'ies'} found:`));
         for (const m of others.slice(0, 3)) {
-          console.log(`  ${colors.dim(m.id)}  ${m.text}`);
+          console.log(`  ${colors.dim(m.id)}  ${m.text}${m.file ? colors.dim(` (${m.file})`) : ''}`);
         }
       }
     } catch {
@@ -35,7 +36,7 @@ export async function rememberCommand(text: string, options: { ref?: string }): 
   }
 }
 
-export async function memoriesCommand(options: { search?: string }): Promise<void> {
+export async function memoriesCommand(options: { search?: string; file?: string }): Promise<void> {
   const container = new Container();
   if (!container.configManager.isInitialized()) {
     console.log(colors.red('Project not initialized. Run `nc init` first.'));
@@ -44,7 +45,7 @@ export async function memoriesCommand(options: { search?: string }): Promise<voi
 
   try {
     await container.initialize();
-    const memories = await container.memoryService.list(options.search);
+    const memories = await container.memoryService.list(options.search, options.file);
 
     if (memories.length === 0) {
       console.log(colors.dim('No memories found.'));
@@ -53,7 +54,8 @@ export async function memoriesCommand(options: { search?: string }): Promise<voi
 
     for (const m of memories) {
       const date = m.createdAt.split('T')[0];
-      console.log(`  ${colors.cyan(m.id)}  ${colors.dim(date)}  ${m.text}`);
+      const scope = m.file ? colors.dim(` ${m.file}`) : '';
+      console.log(`  ${colors.cyan(m.id)}  ${colors.dim(date)}  ${m.text}${scope}`);
     }
   } catch (err) {
     console.error(colors.red(`Failed: ${err}`));

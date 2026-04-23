@@ -34,6 +34,8 @@ const text = (s: string) => ({ content: [{ type: T, text: s }] });
 const KEY_MAP: Record<string, string> = {
   type: 't', file: 'f', method: 'm', class: 'c', loc: 'l',
   score: 's', sig: 'sg', insight: 'i', refs: 'r', text: 'x',
+  suggestedNext: 'n', suggestedNextReason: 'nr', suggestedNextConfidence: 'nc',
+  related: 'rel', searchIntent: 'si', searchTelemetry: 'st',
 };
 function shorten(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -88,6 +90,9 @@ export class McpServer {
             return json(shortResults(results.map(r => ({
               type: r.type, file: r.file, method: r.method,
               class: r.class, loc: r.loc, text: r.text,
+              suggestedNext: r.suggestedNext,
+              suggestedNextReason: r.suggestedNextReason,
+              suggestedNextConfidence: r.suggestedNextConfidence,
             }))));
           }
 
@@ -136,16 +141,28 @@ export class McpServer {
           }
 
           case 'remember': {
-            await this.container.memoryService.remember(args?.text as string, args?.ref as string);
+            await this.container.memoryService.remember(args?.text as string, args?.ref as string, args?.file as string | undefined);
             return text('ok');
           }
 
           case 'memories': {
-            const list = await this.container.memoryService.list(args?.q as string);
+            const list = await this.container.memoryService.list(args?.q as string, args?.file as string | undefined);
             if (args?.id) {
-              return json(list.map(m => ({ id: m.id, text: m.text, ref: m.ref })));
+              return json(list.map(m => ({ id: m.id, text: m.text, ref: m.ref, file: m.file, scope: m.scope })));
             }
-            return json(list.map(m => ({ text: m.text, ref: m.ref })));
+            return json(list.map(m => ({ text: m.text, ref: m.ref, file: m.file, scope: m.scope })));
+          }
+
+          case 'refs': {
+            return json(await this.container.dependencyService.getRefsForSymbol(args?.symbol as string, args?.d as number | undefined));
+          }
+
+          case 'callers': {
+            return json(await this.container.dependencyService.getCallers(args?.symbol as string));
+          }
+
+          case 'trace': {
+            return json(await this.container.dependencyService.traceSymbol(args?.symbol as string, args?.d as number | undefined));
           }
 
           case 'forget': {

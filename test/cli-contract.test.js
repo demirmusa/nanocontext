@@ -10,3 +10,24 @@ test('forget command help keeps the id argument optional', () => {
   assert.match(output, /Usage: nc forget \[options\] \[id\]/);
   assert.match(output, /--before <date>/);
 });
+
+test('cli help exposes header, peek, and open read primitives', () => {
+  const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
+  const output = execFileSync(process.execPath, [cliPath, '--help'], { encoding: 'utf-8' });
+
+  assert.match(output, /\bheader\b/);
+  assert.match(output, /\bpeek\b/);
+  assert.match(output, /\bopen\b/);
+  assert.match(output, /\brefs\b/);
+  assert.match(output, /\bcallers\b/);
+  assert.match(output, /\btrace\b/);
+});
+
+test('memory command help exposes file-scoped flags', () => {
+  const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
+  const rememberHelp = execFileSync(process.execPath, [cliPath, 'remember', '--help'], { encoding: 'utf-8' });
+  const memoriesHelp = execFileSync(process.execPath, [cliPath, 'memories', '--help'], { encoding: 'utf-8' });
+
+  assert.match(rememberHelp, /--file <path>/);
+  assert.match(memoriesHelp, /--file <path>/);
+});

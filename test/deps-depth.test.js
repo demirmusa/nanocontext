@@ -14,6 +14,11 @@ function createDependencyService(header) {
       exists: () => true,
       getHeaderPath: () => '',
     },
+    {
+      listTrackedFiles: () => [header.file],
+      searchExact: () => [{ type: 'method', file: header.file, method: header.methods[0].name, loc: header.methods[0].loc, id: header.methods[0].id }],
+      searchRegex: () => [],
+    },
   );
 }
 

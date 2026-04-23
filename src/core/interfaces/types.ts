@@ -56,6 +56,45 @@ export interface SearchResult {
   insight?: string;
   text?: string;
   score?: number;
+  matchReason?: string;
+  suggestedNext?: string;
+  suggestedNextReason?: string;
+  suggestedNextConfidence?: number;
+  related?: Array<Pick<SearchResult, 'file' | 'method' | 'class' | 'loc' | 'sig'>>;
+  searchIntent?: 'exact-symbol' | 'trace' | 'semantic' | 'dependency' | 'mixed';
+  searchTelemetry?: {
+    route?: string;
+    rerankUsed?: boolean;
+    fallbackPath?: string[];
+    topConfidence?: number;
+  };
+}
+
+export interface CodeEntitySummary {
+  name: string;
+  loc: string;
+  sig?: string;
+  class?: string;
+}
+
+export interface CodeFileSummary {
+  file: string;
+  totalLines: number;
+  importCount: number;
+  imports: string[];
+  classes: CodeEntitySummary[];
+  methods: CodeEntitySummary[];
+  memories?: MemoryRecord[];
+  warning?: string;
+  error?: string;
+}
+
+export interface ResolvedSymbolTarget {
+  file: string;
+  symbol: string;
+  loc: string;
+  sig?: string;
+  type: 'method' | 'class';
 }
 
 export interface SmartSearchCandidate {
@@ -113,6 +152,15 @@ export interface MemoryRecord {
   text: string;
   createdAt: string;
   ref?: string;
+  file?: string;
+  scope?: 'project' | 'file';
+}
+
+export interface TraceStep {
+  file: string;
+  symbol: string;
+  loc?: string;
+  refs: string[];
 }
 
 export interface ScanProgress {

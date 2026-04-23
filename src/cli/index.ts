@@ -5,10 +5,16 @@ import { scanCommand } from './commands/scan';
 import { watchCommand, watchStopCommand } from './commands/watch';
 import { searchCommand } from './commands/search';
 import { inspectCommand } from './commands/inspect';
+import { headerCommand } from './commands/header';
 import { rememberCommand, memoriesCommand, forgetCommand } from './commands/memory';
 import { statusCommand } from './commands/status';
 import { mcpServerCommand } from './commands/mcp-server';
 import { getCommand } from './commands/get';
+import { peekCommand } from './commands/peek';
+import { openCommand } from './commands/open';
+import { refsCommand } from './commands/refs';
+import { callersCommand } from './commands/callers';
+import { traceCommand } from './commands/trace';
 import { clearCommand } from './commands/clear';
 
 const program = new Command();
@@ -68,7 +74,8 @@ program
 program
   .command('get <target>')
   .alias('g')
-  .description('Get lines from a file (e.g. nc get myfile.cs[76-89])')
+  .description('Get a compact file summary or raw lines (e.g. nc get myfile.cs, nc get myfile.cs[76-89])')
+  .option('--around <lines>', 'Expand ranged or symbol reads by N surrounding lines')
   .action(getCommand);
 
 program
@@ -77,15 +84,52 @@ program
   .action(inspectCommand);
 
 program
+  .command('header <file>')
+  .description('Show compact file structure only')
+  .action(headerCommand);
+
+program
+  .command('peek <target>')
+  .description('Show a compact preview for a file or symbol')
+  .action(peekCommand);
+
+program
+  .command('open <target>')
+  .description('Open a wider preview for a file or symbol')
+  .option('--around <lines>', 'Expand symbol preview by N surrounding lines')
+  .option('--class', 'Open the containing class when the target resolves to a method')
+  .option('--top', 'Open from the top of the file when the target is a file path')
+  .action(openCommand);
+
+program
+  .command('refs <symbol>')
+  .description('Show direct refs/callees for a symbol')
+  .option('-d, --depth <number>', 'Trace depth')
+  .action(refsCommand);
+
+program
+  .command('callers <symbol>')
+  .description('Show likely inbound references for a symbol')
+  .action(callersCommand);
+
+program
+  .command('trace <symbol>')
+  .description('Trace a likely execution chain for a symbol')
+  .option('-d, --depth <number>', 'Trace depth')
+  .action(traceCommand);
+
+program
   .command('remember <text>')
   .description('Add a note to project memory')
   .option('--ref <reference>', 'Optional reference')
+  .option('-f, --file <path>', 'Attach the memory to a file')
   .action(rememberCommand);
 
 program
   .command('memories')
   .description('List all memories')
   .option('-s, --search <query>', 'Filter memories')
+  .option('-f, --file <path>', 'Only show memories for one file')
   .action(memoriesCommand);
 
 program

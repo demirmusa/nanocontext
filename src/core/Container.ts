@@ -205,21 +205,21 @@ export class Container {
 
   get codeReadService(): CodeReadService {
     if (!this._codeReadService) {
-      this._codeReadService = new CodeReadService(this.configManager);
+      this._codeReadService = new CodeReadService(this.configManager, this.headerStore, this.stateStore, this.memoryStore);
     }
     return this._codeReadService;
   }
 
   get dependencyService(): DependencyService {
     if (!this._dependencyService) {
-      this._dependencyService = new DependencyService(this.configManager, this.headerStore);
+      this._dependencyService = new DependencyService(this.configManager, this.headerStore, this.stateStore);
     }
     return this._dependencyService;
   }
 
   get memoryService(): MemoryService {
     if (!this._memoryService) {
-      this._memoryService = new MemoryService(this.memoryStore);
+      this._memoryService = new MemoryService(this.memoryStore, this.configManager);
     }
     return this._memoryService;
   }

@@ -102,6 +102,7 @@ export class AgentSetupService {
 ## NanoContext MCP
 
 This project uses **NanoContext**, a code intelligence MCP server that provides semantic search, AST-based code analysis, and dependency tracking across the entire codebase. You MUST use NanoContext tools to understand code structure and relationships before making any changes. Do NOT rely solely on file reads — always query NanoContext first.
+This project uses **NanoContext**, a code intelligence MCP server that provides semantic search, AST-based code analysis, and dependency tracking across the entire codebase. Use NanoContext for the minimum number of steps needed to get confident context. Do not keep reformulating the same query without new evidence.
 
 ### Rules
 
@@ -129,16 +130,22 @@ NanoContext has a persistent memory store that survives across sessions. Use it 
 ### Workflow
 
 1. **Session start**: Call \`memories\` to load previous context
-2. **Before editing**: Use \`search\`, \`svec\`, \`sdeep\`, or \`nc://headers/{file_path}\` to understand the code and its dependencies
+2. **Before editing**: Start with \`search\`, then open one strong hit with \`get\` or a header resource. Stop searching when one result is clearly right.
 3. **After editing**: Run \`scan\` to re-index all changed files at once
 4. **Important findings**: Call \`remember\` to persist context for future sessions
+
+### Playbooks
+
+- **Trace task**: \`search\` -> \`get\` -> \`refs\` / \`trace\`
+- **Edit discovery**: \`search\` -> \`get <file>\` -> \`open <symbol>\`
+- **Impact review**: \`search\` -> \`callers\` -> \`refs\`
 ${NANOCONTEXT_SECTION_END}`;
     }
 
     return `${NANOCONTEXT_SECTION_MARKER}
 ## NanoContext CLI
 
-This project uses **NanoContext**, a CLI-based code intelligence tool that provides semantic search, AST-based code analysis, and dependency tracking across the entire codebase. You MUST use NanoContext CLI commands to understand code structure and relationships before making any changes. Do NOT rely solely on grep/file reads — always query NanoContext first.
+This project uses **NanoContext**, a CLI-based code intelligence tool that provides semantic search, AST-based code analysis, and dependency tracking across the entire codebase. Use NanoContext CLI commands when they reduce exploration cost. Do not repeat the same query without new evidence.
 
 ### Commands
 
@@ -147,10 +154,13 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 - \`nc search "<query>"\`: Perform text search across the codebase.
 - \`nc search -v "<query>"\`: Perform semantic search.
 - \`nc search -d "<pattern>"\`: Perform dependency or deep regex search.
-- \`nc memory set <key> <value>\`: Save important project context and architectural decisions.
-- \`nc memory list\`: View saved memories.
+- \`nc remember "<text>"\`: Save important project context and architectural decisions.
+- \`nc memories\`: View saved memories.
 - \`nc status\`: View indexing status and project stats.
-- \`nc get <target>\`: Read parsed AST structure or headers for a specific path.
+- \`nc get <file>\`: Show a compact file summary with imports, classes, and methods.
+- \`nc get <file>[<start>-<end>]\`: Read raw file lines for a precise range.
+- \`nc refs <symbol>\` / \`nc callers <symbol>\` / \`nc trace <symbol>\`: Walk code flow intentionally.
+- \`nc header <file>\` / \`nc peek <target>\` / \`nc open <target>\`: Use progressively wider read primitives.
 
 ### Rules
 
@@ -163,16 +173,23 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 
 NanoContext has a persistent memory store that survives across sessions. Use it actively:
 
-- **Session start**: Run \`nc memory list\` at the beginning of every session to load previous context.
-- **During work**: When you make an architectural decision or encounter an important pattern, run \`nc memory set <key> "<value>"\`.
+- **Session start**: Run \`nc memories\` at the beginning of every session to load previous context.
+- **During work**: When you make an architectural decision or encounter an important pattern, run \`nc remember "<note>"\`.
+- **File notes**: When a finding is specific to one file, run \`nc remember "<note>" -f path\\to\\file.cs\`.
 - **What to remember**: Design decisions, important conventions, known issues, relationships between components.
 
 ### Workflow
 
-1. **Session start**: Run \`nc memory list\`
-2. **Before editing**: Use \`nc search\` to understand the code and its dependencies
+1. **Session start**: Run \`nc memories\`
+2. **Before editing**: Use \`nc search\` to find the target, then \`nc get <file>\` or \`nc open <symbol>\` to inspect it
 3. **After editing**: Run \`nc scan\` to re-index changed files
-4. **Important findings**: Call \`nc memory set\` to persist context
+4. **Important findings**: Call \`nc remember\` to persist context
+
+### Playbooks
+
+- **Trace task**: \`nc search\` -> \`nc get <file>\` -> \`nc refs <symbol>\` / \`nc trace <symbol>\`
+- **Edit discovery**: \`nc search\` -> \`nc get <file>\` -> \`nc open <symbol>\`
+- **Review/impact**: \`nc search\` -> \`nc callers <symbol>\` -> \`nc refs <symbol>\`
 ${NANOCONTEXT_SECTION_END}`;
   }
 

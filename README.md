@@ -133,7 +133,13 @@ nc s "error handling" -l 10           # limit results (default: 3)
 ### Read code
 
 ```bash
+nc g src/auth/login.ts                # compact file summary
 nc g src/auth/login.ts[15-40]         # get lines 15-40 with line numbers
+nc peek LoginService.handleLogin      # compact symbol preview
+nc open LoginService.handleLogin      # wider symbol preview
+nc refs LoginService.handleLogin      # direct refs/callees
+nc callers LoginService.handleLogin   # likely inbound refs
+nc trace LoginService.handleLogin     # likely call chain
 nc inspect src/core/Container.ts      # full parsed structure of a file
 ```
 
@@ -156,8 +162,10 @@ Watch mode shows real-time progress per pipeline step:
 ```bash
 nc remember "Auth uses JWT with RS256 signing"
 nc remember "Redis TTL is 5min" --ref "src/cache/redis.ts"
+nc remember "This file owns token issuance" -f "src/auth/AuthService.cs"
 nc memories                           # list all
 nc memories --search "auth"           # search
+nc memories --file "src/auth/AuthService.cs"
 nc forget mem_abc123                  # delete
 nc forget --before 2026-01-01         # bulk delete older memories
 ```
@@ -221,9 +229,12 @@ Or configure manually:
 | `sregdeep` | `p`, `n?` | Regex search with full data (sigs, refs, insights) |
 | `code` | `f`, `loc` | Read source code by line range (e.g. `loc="45-72"`) |
 | `deps` | `f`, `m`, `d?` | Get call references of a method (`m` = method name or ID, `d` = depth, max 3) |
+| `refs` | `symbol`, `d?` | Get direct refs/callees for a symbol |
+| `callers` | `symbol` | Get likely inbound refs for a symbol |
+| `trace` | `symbol`, `d?` | Trace a likely execution chain for a symbol |
 | `scan` | `f?` | Scan project or a specific file/glob |
-| `remember` | `text`, `ref?` | Save a note to project memory |
-| `memories` | `q?`, `id?` | List memories. `id=true` to include IDs (for forget) |
+| `remember` | `text`, `ref?`, `file?` | Save a note to project memory |
+| `memories` | `q?`, `file?`, `id?` | List memories. `file` limits results to one file |
 | `forget` | `id` | Delete a memory |
 | `status` | — | Indexing statistics |
 

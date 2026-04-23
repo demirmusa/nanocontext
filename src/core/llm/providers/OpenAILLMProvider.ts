@@ -25,13 +25,9 @@ export class OpenAILLMProvider implements ILLMProvider {
   }
 
   async generateFileInsights(methods: { id: string; name: string; code: string }[], language: string): Promise<FileInsightResult> {
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [
-        { role: 'user', content: buildFileInsightPrompt(methods, language) },
-      ],
-      temperature: 1,
-    });
+    const response = await this.client.chat.completions.create(
+      this.buildChatCompletionRequest(buildFileInsightPrompt(methods, language)),
+    );
 
     const content = response.choices[0]?.message?.content?.trim() || '';
 
@@ -46,18 +42,34 @@ export class OpenAILLMProvider implements ILLMProvider {
     candidates: SmartSearchCandidate[],
     limit: number,
   ): Promise<SmartSearchSelectionResult> {
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [
-        { role: 'user', content: buildSmartSearchPrompt(query, candidates, limit) },
-      ],
-      temperature: 0,
-    });
+    const response = await this.client.chat.completions.create(
+      this.buildChatCompletionRequest(buildSmartSearchPrompt(query, candidates, limit)),
+    );
 
     const content = response.choices[0]?.message?.content?.trim() || '';
     return {
       selectedIds: parseSmartSearchResponse(content, candidates.map(candidate => candidate.id)),
       rawResponse: content || '(empty)',
     };
+  }
+
+  private buildChatCompletionRequest(
+    prompt: string,
+    options?: {
+      temperature?: number;
+    },
+  ): OpenAI.Chat.ChatCompletionCreateParamsNonStreaming {
+    const request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
+      model: this.model,
+      messages: [
+        { role: 'user', content: prompt },
+      ],
+    };
+
+    if (options?.temperature !== undefined) {
+      request.temperature = options.temperature;
+    }
+
+    return request;
   }
 }

@@ -19,6 +19,9 @@ function createDependencyService(header) {
       searchExact: () => [{ type: 'method', file: header.file, method: header.methods[0].name, loc: header.methods[0].loc, id: header.methods[0].id }],
       searchRegex: () => [],
     },
+    {
+      resolveSymbolTarget: async (query) => ({ query, candidates: [] }),
+    },
   );
 }
 

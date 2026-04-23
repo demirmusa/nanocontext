@@ -1,5 +1,6 @@
 import { Container } from '../../core/Container';
 import { colors } from '../utils/colors';
+import { printTraceSurface } from '../utils/traceSurface';
 
 export async function traceCommand(symbol: string, options: { depth?: string } = {}): Promise<void> {
   const container = new Container();
@@ -10,17 +11,8 @@ export async function traceCommand(symbol: string, options: { depth?: string } =
 
   try {
     await container.initialize();
-    const steps = await container.dependencyService.traceSymbol(symbol, parseDepth(options.depth));
-    if (steps.length === 0) {
-      console.log(colors.dim('No trace found.'));
-      return;
-    }
-    for (const step of steps) {
-      console.log(`${step.file}  ${step.symbol}${step.loc ? ` [${step.loc}]` : ''}`);
-      if (step.refs.length > 0) {
-        console.log(colors.dim(`  refs: ${step.refs.join(', ')}`));
-      }
-    }
+    const surface = await container.dependencyService.traceSymbol(symbol, parseDepth(options.depth));
+    printTraceSurface(surface, 'No trace found.');
   } catch (err) {
     console.error(colors.red(`Trace failed: ${err}`));
     process.exit(1);

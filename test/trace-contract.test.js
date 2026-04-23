@@ -41,6 +41,9 @@ function createService(headers) {
       },
       searchRegex: () => [],
     },
+    {
+      resolveSymbolTarget: async (query) => ({ query, candidates: [] }),
+    },
   );
 }
 
@@ -49,11 +52,26 @@ test('dependency service returns callers and trace steps for a symbol', async ()
 
   const refs = await service.getRefsForSymbol('entry', 2);
   const callers = await service.getCallers('stepA');
+  const callees = await service.getCallees('entry');
   const trace = await service.traceSymbol('entry', 3);
 
   assert.deepEqual(refs, ['finish', 'stepA']);
-  assert.equal(callers[0].method, 'entry');
-  assert.equal(trace.length, 3);
-  assert.equal(trace[0].symbol, 'entry');
-  assert.equal(trace[1].symbol, 'stepA');
+  assert.equal(callers.results[0].symbol, 'entry');
+  assert.equal(callers.results[0].kind, 'caller');
+  assert.equal(callees.results[0].symbol, 'stepA');
+  assert.equal(callees.results[0].kind, 'callee');
+  assert.equal(trace.results.length, 3);
+  assert.equal(trace.results[0].symbol, 'entry');
+  assert.equal(trace.results[1].symbol, 'stepA');
+  assert.match(trace.suggestedNext, /nc open stepA/);
+});
+
+test('dependency service returns ranked candidates and explicit missing-index guidance', async () => {
+  const service = createService(createHeaders());
+
+  const callers = await service.getCallers('missingSymbol');
+
+  assert.deepEqual(callers.results, []);
+  assert.match(callers.warning, /No indexed symbol match found/);
+  assert.equal(callers.suggestedNext, 'nc search "missingSymbol"');
 });

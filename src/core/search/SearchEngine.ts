@@ -22,6 +22,17 @@ export class SearchEngine implements ISearchEngine {
     const results: SearchResult[] = [];
     const maxResults = limit || this.defaultLimit;
     const normalizedTypeFilter = typeFilter && typeFilter !== 'all' ? typeFilter : undefined;
+    const lexicalResults = normalizedTypeFilter === 'memory'
+      ? []
+      : [
+        ...this.stateStore.searchExact(query, maxResults),
+        ...this.stateStore.searchRegex(escapeRegex(query), maxResults),
+      ].map(result => ({
+        ...result,
+        score: lexicalBoostScore(query, result),
+      }));
+
+    results.push(...lexicalResults);
 
     if (normalizedTypeFilter !== 'memory' && this.embeddingProvider) {
       try {
@@ -31,7 +42,10 @@ export class SearchEngine implements ISearchEngine {
           normalizedTypeFilter ? Math.max(maxResults * 3, maxResults) : Math.max(maxResults * 2, maxResults),
           normalizedTypeFilter ? { type: normalizedTypeFilter } : undefined,
         );
-        results.push(...vectorResults);
+        results.push(...vectorResults.map(result => ({
+          ...result,
+          score: lexicalBoostScore(query, result) + (typeof result.score === 'number' ? Math.max(0, 1 - result.score) : 0),
+        })));
       } catch (err) {
         this.logger.error('Vector search failed:', err);
       }
@@ -45,6 +59,18 @@ export class SearchEngine implements ISearchEngine {
             type: 'memory',
             id: mem.id,
             text: mem.text,
+            file: mem.file,
+            score: lexicalBoostScore(query, { text: mem.text, file: mem.file }),
+          });
+        }
+        const lexicalMemories = await this.memoryStore.list(query);
+        for (const mem of lexicalMemories) {
+          results.push({
+            type: 'memory',
+            id: mem.id,
+            text: mem.text,
+            file: mem.file,
+            score: lexicalBoostScore(query, { text: mem.text, file: mem.file }) + 1,
           });
         }
       } catch (err) {
@@ -55,7 +81,9 @@ export class SearchEngine implements ISearchEngine {
     const filtered = normalizedTypeFilter
       ? results.filter(result => result.type === normalizedTypeFilter)
       : results;
-    return this.dedupeResults(filtered).slice(0, maxResults);
+    return this.dedupeResults(filtered)
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .slice(0, maxResults);
   }
 
   async searchDeep(query: string, limit?: number, typeFilter?: string): Promise<SearchResult[]> {
@@ -137,4 +165,30 @@ export class SearchEngine implements ISearchEngine {
 
     return deduped;
   }
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function lexicalBoostScore(query: string, result: Pick<SearchResult, 'file' | 'method' | 'class' | 'sig' | 'text'>): number {
+  const q = query.toLowerCase();
+  let score = 0;
+  const file = result.file?.toLowerCase() ?? '';
+  const method = result.method?.toLowerCase() ?? '';
+  const cls = result.class?.toLowerCase() ?? '';
+  const sig = result.sig?.toLowerCase() ?? '';
+  const text = result.text?.toLowerCase() ?? '';
+
+  if (method === q || cls === q || `${cls}.${method}` === q) score += 5;
+  if (file.includes(q)) score += 3;
+  if (sig.includes(q)) score += 2;
+  if (text.includes(q)) score += 2;
+
+  for (const token of q.split(/\s+/).filter(Boolean)) {
+    if (method.includes(token) || cls.includes(token)) score += 1.5;
+    if (file.includes(token) || sig.includes(token) || text.includes(token)) score += 0.5;
+  }
+
+  return score;
 }

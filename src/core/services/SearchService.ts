@@ -16,6 +16,9 @@ export interface SearchRequest {
 }
 
 export class SearchService {
+  private resultCache = new Map<string, SearchResult[]>();
+  private emptyQueryCounts = new Map<string, number>();
+
   constructor(
     private searchEngine: ISearchEngine,
     private configManager: IConfigManager,
@@ -26,43 +29,128 @@ export class SearchService {
   async execute(request: SearchRequest): Promise<SearchResult[]> {
     const searchConfig = await this.resolveSearchConfig(request.limit);
     const limit = searchConfig.limit;
+    const intent = classifyIntent(request.query);
+    const cacheKey = this.buildCacheKey(request, limit);
+    const cached = this.resultCache.get(cacheKey);
+    if (cached) {
+      return cached.map(result => ({ ...result }));
+    }
 
+    let results: SearchResult[];
     if (request.mode === 'regex') {
       if (request.deep) {
-        return this.searchEngine.searchRegexDeep(request.query, limit);
+        results = this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.searchRegexDeep(request.query, limit)), request.query, intent, ['regex']);
+        this.storeCachedResults(cacheKey, results);
+        return results;
       }
-      return this.searchEngine.searchRegex(request.query, limit);
+      results = this.finalizeResults(this.attachSuggestedNext(request.mode, this.searchEngine.searchRegex(request.query, limit)), request.query, intent, ['regex']);
+      this.storeCachedResults(cacheKey, results);
+      return results;
     }
 
     if (request.mode === 'vector') {
       if (searchConfig.smartSearchEnabled) {
-        return this.executeSmartVectorSearch(request, limit, searchConfig.smartSearchCandidateMultiplier);
+        results = await this.executeSmartVectorSearch(request, limit, intent, searchConfig.smartSearchCandidateMultiplier);
+        this.storeCachedResults(cacheKey, results);
+        return results;
       }
       if (request.deep) {
-        return this.searchEngine.searchDeep(request.query, limit, request.typeFilter);
+        results = this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.searchDeep(request.query, limit, request.typeFilter)), request.query, intent, ['vector']);
+        this.storeCachedResults(cacheKey, results);
+        return results;
       }
-      return this.searchEngine.search(request.query, limit, request.typeFilter);
+      results = this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.search(request.query, limit, request.typeFilter)), request.query, intent, ['vector']);
+      this.storeCachedResults(cacheKey, results);
+      return results;
     }
 
-    return this.searchEngine.searchExact(request.query, limit);
+    if (intent === 'semantic' && request.mode === 'exact') {
+      const semanticResults = this.finalizeResults(
+        this.attachSuggestedNext('vector', await this.searchEngine.search(request.query, limit, request.typeFilter)),
+        request.query,
+        intent,
+        ['intent:semantic', 'vector'],
+      );
+      this.storeCachedResults(cacheKey, semanticResults);
+      return semanticResults;
+    }
+
+    const exactResults = this.searchEngine.searchExact(request.query, limit);
+    if (exactResults.length > 0) {
+      results = this.finalizeResults(this.attachSuggestedNext(request.mode, exactResults), request.query, intent, ['exact']);
+      this.storeCachedResults(cacheKey, results);
+      return results;
+    }
+
+    const normalizedQuery = normalizeSearchQuery(request.query);
+    if (normalizedQuery && normalizedQuery !== request.query) {
+      const normalizedResults = this.searchEngine.searchExact(normalizedQuery, limit);
+      if (normalizedResults.length > 0) {
+        results = this.finalizeResults(this.attachSuggestedNext(
+          request.mode,
+          normalizedResults.map(result => ({
+            ...result,
+            matchReason: `No exact match for "${request.query}". Showing normalized exact results for "${normalizedQuery}".`,
+          })),
+        ), request.query, intent, ['exact', 'normalized-exact']);
+        this.storeCachedResults(cacheKey, results);
+        return results;
+      }
+    }
+
+    const regexPattern = escapeRegex(normalizedQuery || request.query);
+    const regexResults = this.searchEngine.searchRegex(regexPattern, limit);
+    if (regexResults.length > 0) {
+      results = this.finalizeResults(this.attachSuggestedNext(
+        'regex',
+        regexResults.map(result => ({
+          ...result,
+          matchReason: `No exact match for "${request.query}". Showing closest regex matches for "${normalizedQuery || request.query}".`,
+        })),
+      ), request.query, intent, ['exact', 'regex-fallback']);
+      this.storeCachedResults(cacheKey, results);
+      return results;
+    }
+
+    const emptyKey = this.buildEmptyQueryKey(request, limit);
+    const emptyCount = (this.emptyQueryCounts.get(emptyKey) ?? 0) + 1;
+    this.emptyQueryCounts.set(emptyKey, emptyCount);
+
+    if (emptyCount > 1) {
+      const semanticResults = this.attachSuggestedNext(
+        'vector',
+        await this.searchEngine.search(normalizedQuery || request.query, limit, request.typeFilter),
+      );
+      if (semanticResults.length > 0) {
+        results = this.finalizeResults(semanticResults.map(result => ({
+          ...result,
+          matchReason: `Repeated exact miss for "${request.query}". Showing semantic fallback results instead.`,
+        })), request.query, intent, ['exact', 'semantic-fallback']);
+        this.storeCachedResults(cacheKey, results);
+        return results;
+      }
+    }
+
+    return [];
   }
 
   private async executeSmartVectorSearch(
     request: SearchRequest,
     limit: number,
+    intent: SearchResult['searchIntent'],
     candidateMultiplier: number,
   ): Promise<SearchResult[]> {
     if (!this.llmProvider) {
       throw new Error('Smart search requires a configured LLM provider. Re-run `nc init` and enable an LLM provider.');
     }
 
-    const candidateLimit = Math.max(limit, limit * candidateMultiplier);
+    const candidateLimit = this.resolveCandidateLimit(limit, candidateMultiplier, intent);
     const candidates = request.deep
       ? await this.searchEngine.searchDeep(request.query, candidateLimit, request.typeFilter)
       : await this.searchEngine.search(request.query, candidateLimit, request.typeFilter);
 
     if (candidates.length <= limit) {
-      return candidates;
+      return this.finalizeResults(this.attachSuggestedNext(request.mode, candidates), request.query, intent, ['vector', 'rerank-skipped'], false);
     }
 
     const mappedCandidates = candidates.map((candidate, index) => ({
@@ -78,13 +166,13 @@ export class SearchService {
       );
       const selectedResults = this.applySmartSearchSelection(mappedCandidates, selection.selectedIds, limit);
       if (selectedResults.length > 0) {
-        return selectedResults;
+        return this.finalizeResults(this.attachSuggestedNext(request.mode, selectedResults), request.query, intent, ['vector', 'rerank'], true);
       }
     } catch (error) {
       this.logger?.warn('Smart search rerank failed, falling back to vector ordering:', error);
     }
 
-    return candidates.slice(0, limit);
+    return this.finalizeResults(this.attachSuggestedNext(request.mode, candidates.slice(0, limit)), request.query, intent, ['vector', 'rerank-fallback'], false);
   }
 
   private async resolveSearchConfig(requestedLimit?: number): Promise<{
@@ -142,6 +230,168 @@ export class SearchService {
 
     return selectedResults;
   }
+
+  private attachSuggestedNext(mode: SearchMode, results: SearchResult[]): SearchResult[] {
+    return results.map(result => {
+      const suggestion = this.buildSuggestedNext(mode, result);
+      return suggestion ? { ...result, ...suggestion } : result;
+    });
+  }
+
+  private buildSuggestedNext(
+    mode: SearchMode,
+    result: SearchResult,
+  ): Pick<SearchResult, 'suggestedNext' | 'suggestedNextReason' | 'suggestedNextConfidence'> | null {
+    if (result.type === 'memory') {
+      return null;
+    }
+
+    if (result.file && result.loc) {
+      return {
+        suggestedNext: `nc get ${result.file}[${this.expandLoc(result.loc)}]`,
+        suggestedNextReason: `${result.type} match with a precise location`,
+        suggestedNextConfidence: mode === 'exact' ? 0.95 : mode === 'regex' ? 0.85 : 0.75,
+      };
+    }
+
+    if (result.file) {
+      return {
+        suggestedNext: `nc get ${result.file}`,
+        suggestedNextReason: 'open the file summary before narrowing to a raw range',
+        suggestedNextConfidence: 0.5,
+      };
+    }
+
+    return null;
+  }
+
+  private expandLoc(loc: string, padding: number = 8): string {
+    const [start, end] = loc.split('-').map(Number);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+      return loc;
+    }
+
+    return `${Math.max(1, start - padding)}-${end + padding}`;
+  }
+
+  private buildCacheKey(request: SearchRequest, limit: number): string {
+    return [
+      request.mode,
+      request.deep ? 'deep' : 'shallow',
+      request.typeFilter ?? 'all',
+      limit,
+      classifyIntent(request.query),
+      normalizeSearchQuery(request.query).toLowerCase(),
+    ].join('::');
+  }
+
+  private buildEmptyQueryKey(request: SearchRequest, limit: number): string {
+    return this.buildCacheKey(request, limit);
+  }
+
+  private storeCachedResults(cacheKey: string, results: SearchResult[]): void {
+    this.resultCache.set(cacheKey, results.map(result => ({ ...result })));
+  }
+
+  private resolveCandidateLimit(limit: number, candidateMultiplier: number, intent: SearchResult['searchIntent']): number {
+    if (intent === 'exact-symbol' || intent === 'dependency') {
+      return Math.max(limit, limit * 2);
+    }
+    if (intent === 'trace') {
+      return Math.max(limit, limit * 4);
+    }
+    return Math.max(limit, limit * candidateMultiplier);
+  }
+
+  private finalizeResults(
+    results: SearchResult[],
+    query: string,
+    intent: SearchResult['searchIntent'],
+    fallbackPath: string[],
+    rerankUsed?: boolean,
+  ): SearchResult[] {
+    const clustered = clusterResults(results);
+    const topConfidence = clustered[0]?.suggestedNextConfidence;
+    const finalResults = clustered.map(result => ({
+      ...result,
+      searchIntent: intent,
+      searchTelemetry: {
+        route: fallbackPath[0],
+        fallbackPath,
+        rerankUsed,
+        topConfidence,
+      },
+    }));
+    this.logger?.info(`[search] q="${query}" path="${fallbackPath.join(' > ')}" intent=${intent} count=${finalResults.length} rerank=${rerankUsed === true ? 'yes' : rerankUsed === false ? 'no' : 'n/a'} topConfidence=${topConfidence ?? 'n/a'}`);
+    return finalResults;
+  }
+}
+
+function normalizeSearchQuery(query: string): string {
+  return query
+    .replace(/<[^>]+>/g, '')
+    .replace(/[()[\]{};,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function classifyIntent(query: string): SearchResult['searchIntent'] {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return 'mixed';
+  }
+  if (/\b(trace|flow|call chain|execution path|walk)\b/i.test(trimmed)) {
+    return 'trace';
+  }
+  if (/\b(refs|callers|depends on|dependency)\b/i.test(trimmed)) {
+    return 'dependency';
+  }
+  if (/^[A-Za-z_][\w.<>#-]*$/.test(trimmed) && /[A-Z_#.]/.test(trimmed)) {
+    return 'exact-symbol';
+  }
+  if (/\s/.test(trimmed) && /^[a-z0-9\s-]+$/i.test(trimmed)) {
+    return 'semantic';
+  }
+  return 'mixed';
+}
+
+function clusterResults(results: SearchResult[]): SearchResult[] {
+  const grouped = new Map<string, SearchResult[]>();
+  const memories: SearchResult[] = [];
+
+  for (const result of results) {
+    if (result.type === 'memory') {
+      memories.push(result);
+      continue;
+    }
+    const key = `${result.file ?? ''}:${result.class ?? result.method ?? ''}`;
+    const list = grouped.get(key) ?? [];
+    list.push(result);
+    grouped.set(key, list);
+  }
+
+  const clustered: SearchResult[] = [];
+  for (const list of grouped.values()) {
+    list.sort((a, b) => (b.suggestedNextConfidence ?? 0) - (a.suggestedNextConfidence ?? 0));
+    const [primary, ...rest] = list;
+    if (!primary) continue;
+    clustered.push({
+      ...primary,
+      related: rest.slice(0, 3).map(item => ({
+        file: item.file,
+        method: item.method,
+        class: item.class,
+        loc: item.loc,
+        sig: item.sig,
+      })),
+    });
+  }
+
+  return [...clustered, ...memories];
+}
+
+function escapeRegex(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function normalizeCandidateMultiplier(value?: number): number {

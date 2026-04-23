@@ -25,6 +25,15 @@ test('generated init instructions mirror the MCP tool catalog', () => {
   assert.match(instructions, /nc:\/\/headers\/\{file_path\}/);
 });
 
+test('generated CLI init instructions mention new lookup and symbol-memory flows', () => {
+  const instructions = agentSetupService.getNanoContextInstructions('cli');
+
+  assert.match(instructions, /nc files \[query\]/);
+  assert.match(instructions, /nc callees <symbol>/);
+  assert.match(instructions, /nc remember "<text>" --symbol/);
+  assert.match(instructions, /nc memories --symbol/);
+});
+
 test('generated MCP configs stay workspace-portable', () => {
   const config = JSON.parse(agentSetupService.renderJsonMcpConfig('mcpServers'));
   assert.deepEqual(config.mcpServers.nanocontext.args, ['mcp-server']);

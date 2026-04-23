@@ -34,9 +34,18 @@ cd /path/to/your/project
 nc init       # interactive setup wizard
 nc scan       # index the codebase
 nc s "auth"   # search instantly
+nc symbol AuthService#BuildToken
+nc open AuthService#BuildToken
+nc search --query "AuthService" --query "BuildToken"
+nc symbol --query "AuthService#BuildToken" --query "QueryAsync"
+nc files "AuthService"
 ```
 
 `nc init` sets up agent-specific config and project instructions. `nc scan` builds the first project index. After that, supported agents in this repo can use NanoContext automatically as their code-navigation layer.
+
+When exact search misses, NanoContext retries a normalized exact form and then semantic search automatically. Fallback hits are labeled in the output so agents can tell recovery results from direct exact matches.
+For related lookups, prefer tool-native batching such as `nc search --query "A" --query "B"` instead of shell chaining like `cmd1 && cmd2` or pipelines.
+Normal `nc search` output stays compact: top hit first, then `next:` / `related:` / `memory:` context when available.
 
 ## AI-First Workflow
 
@@ -138,6 +147,7 @@ nc g src/auth/login.ts[15-40]         # get lines 15-40 with line numbers
 nc peek LoginService.handleLogin      # compact symbol preview
 nc open LoginService.handleLogin      # wider symbol preview
 nc refs LoginService.handleLogin      # direct refs/callees
+nc callees LoginService.handleLogin   # likely outbound calls
 nc callers LoginService.handleLogin   # likely inbound refs
 nc trace LoginService.handleLogin     # likely call chain
 nc inspect src/core/Container.ts      # full parsed structure of a file
@@ -163,9 +173,11 @@ Watch mode shows real-time progress per pipeline step:
 nc remember "Auth uses JWT with RS256 signing"
 nc remember "Redis TTL is 5min" --ref "src/cache/redis.ts"
 nc remember "This file owns token issuance" -f "src/auth/AuthService.cs"
+nc remember "Invalidate cache with auth token changes" --symbol "AuthService#BuildToken"
 nc memories                           # list all
 nc memories --search "auth"           # search
 nc memories --file "src/auth/AuthService.cs"
+nc memories --symbol "AuthService#BuildToken"
 nc forget mem_abc123                  # delete
 nc forget --before 2026-01-01         # bulk delete older memories
 ```
@@ -223,6 +235,8 @@ Or configure manually:
 | Tool | Params | What it does |
 |------|--------|--------------|
 | `search` | `q`, `n?` | Exact text search on names, signatures, file paths |
+| `symbol` | `query` | Resolve a symbol name to ranked candidates |
+| `files` | `query?` | List indexed files or search by partial name |
 | `svec` | `q`, `n?`, `t?` | Semantic vector search. `t`: method / class / memory / all |
 | `sdeep` | `q`, `n?` | Vector search with full data (sigs, refs, insights) |
 | `sreg` | `p`, `n?` | Regex search on names, signatures, file paths |
@@ -230,11 +244,12 @@ Or configure manually:
 | `code` | `f`, `loc` | Read source code by line range (e.g. `loc="45-72"`) |
 | `deps` | `f`, `m`, `d?` | Get call references of a method (`m` = method name or ID, `d` = depth, max 3) |
 | `refs` | `symbol`, `d?` | Get direct refs/callees for a symbol |
+| `callees` | `symbol` | Get likely outbound calls for a symbol |
 | `callers` | `symbol` | Get likely inbound refs for a symbol |
 | `trace` | `symbol`, `d?` | Trace a likely execution chain for a symbol |
 | `scan` | `f?` | Scan project or a specific file/glob |
-| `remember` | `text`, `ref?`, `file?` | Save a note to project memory |
-| `memories` | `q?`, `file?`, `id?` | List memories. `file` limits results to one file |
+| `remember` | `text`, `ref?`, `file?`, `symbol?` | Save a note to project memory |
+| `memories` | `q?`, `file?`, `symbol?`, `id?` | List memories. `file` limits results to one file, `symbol` to one symbol |
 | `forget` | `id` | Delete a memory |
 | `status` | — | Indexing statistics |
 

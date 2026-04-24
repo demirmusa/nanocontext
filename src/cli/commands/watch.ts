@@ -1,8 +1,10 @@
+import * as fs from 'fs';
 import { Container } from '../../core/Container';
 import { WatchUpdate } from '../../core/services/WatchService';
+import { WatchProcessInfo } from '../../core/watcher/FileWatcher';
 import { colors } from '../utils/colors';
 
-export async function watchCommand(): Promise<void> {
+export async function watchCommand(options: { detach?: boolean } = {}): Promise<void> {
   const container = new Container();
 
   if (!container.configManager.isInitialized()) {
@@ -11,7 +13,17 @@ export async function watchCommand(): Promise<void> {
   }
 
   if (container.watchService.isRunning()) {
-    console.log(colors.yellow('Watch is already running in another process.'));
+    const info = container.watchService.getRunningProjectWatch();
+    if (!options.detach && info) {
+      attachToWatchLog(info);
+      return;
+    }
+    console.log(colors.yellow(`Watch is already running for this project${info ? ` (pid ${info.pid})` : ''}.`));
+    return;
+  }
+
+  if (options.detach) {
+    startDetachedWatch(container);
     return;
   }
 
@@ -34,17 +46,81 @@ export async function watchCommand(): Promise<void> {
   }
 }
 
+export function watchListCommand(): void {
+  const container = new Container();
+  const watches = container.watchService.listRunningWatches();
+
+  if (watches.length === 0) {
+    console.log(colors.yellow('No watch processes are running.'));
+    return;
+  }
+
+  for (const watch of watches) {
+    console.log(`${colors.cyan(watch.projectRoot)}  pid ${watch.pid}`);
+    console.log(colors.dim(`  started ${watch.startedAt}`));
+    console.log(colors.dim(`  log     ${watch.logPath}`));
+  }
+}
+
 export function watchStopCommand(): void {
   const container = new Container();
   const result = container.watchService.stopRunningProcess();
 
   if (result.status === 'not_running') {
-    console.log(colors.yellow('No watch process is running.'));
-  } else if (result.status === 'stopped') {
-    console.log(colors.green(`Stopped watch process (pid ${result.pid}).`));
+    console.log(colors.yellow('No watch process is running for this project.'));
   } else {
-    console.log(colors.yellow('Watch process was not running (stale lock removed).'));
+    console.log(colors.green(`Stopped watch process (pid ${result.pid}).`));
   }
+}
+
+function startDetachedWatch(container: Container): void {
+  const result = container.watchService.startDetached(process.argv[1]);
+  console.log(colors.green(`Watch started in background (pid ${result.pid}).`));
+  console.log(colors.dim(`  Project: ${result.projectRoot}`));
+  console.log(colors.dim(`  Logs: ${result.logPath}`));
+}
+
+function attachToWatchLog(info: WatchProcessInfo): void {
+  console.log(colors.green(`Attached to running watch process (pid ${info.pid}).`));
+  console.log(colors.dim(`  Project: ${info.projectRoot}`));
+  console.log(colors.dim(`  Log: ${info.logPath}\n`));
+
+  let offset = 0;
+  const printAvailable = () => {
+    if (!fs.existsSync(info.logPath)) return;
+    const stat = fs.statSync(info.logPath);
+    if (stat.size < offset) offset = 0;
+    if (stat.size === offset) return;
+
+    const fd = fs.openSync(info.logPath, 'r');
+    const buffer = Buffer.alloc(stat.size - offset);
+    fs.readSync(fd, buffer, 0, buffer.length, offset);
+    fs.closeSync(fd);
+    offset = stat.size;
+    process.stdout.write(buffer.toString('utf-8'));
+  };
+
+  printAvailable();
+  fs.watchFile(info.logPath, { interval: 500 }, printAvailable);
+
+  const pidCheck = setInterval(() => {
+    try {
+      process.kill(info.pid, 0);
+    } catch {
+      fs.unwatchFile(info.logPath, printAvailable);
+      clearInterval(pidCheck);
+      console.log(colors.yellow('\nWatch process stopped.'));
+      process.exit(0);
+    }
+  }, 1000);
+
+  const shutdown = () => {
+    fs.unwatchFile(info.logPath, printAvailable);
+    clearInterval(pidCheck);
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 function renderWatchUpdate(update: WatchUpdate): void {

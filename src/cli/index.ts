@@ -2,7 +2,7 @@
 import { Command } from 'commander';
 import { initCommand } from './commands/init';
 import { scanCommand } from './commands/scan';
-import { watchCommand, watchStopCommand } from './commands/watch';
+import { watchCommand, watchListCommand, watchStopCommand } from './commands/watch';
 import { searchCommand } from './commands/search';
 import { inspectCommand } from './commands/inspect';
 import { headerCommand } from './commands/header';
@@ -19,6 +19,8 @@ import { callersCommand } from './commands/callers';
 import { calleesCommand } from './commands/callees';
 import { traceCommand } from './commands/trace';
 import { clearCommand } from './commands/clear';
+import { impactCommand } from './commands/impact';
+import { staleCommand } from './commands/stale';
 
 const program = new Command();
 
@@ -57,7 +59,15 @@ program
 const watchCmd = program
   .command('watch')
   .description('Watch for file changes and auto-sync')
-  .action(watchCommand);
+  .option('-d, --detach', 'Run watcher in the background')
+  .option('--list', 'List running watch processes')
+  .action((options: { detach?: boolean; list?: boolean }) => {
+    if (options.list) {
+      watchListCommand();
+      return;
+    }
+    void watchCommand(options);
+  });
 
 watchCmd
   .command('stop')
@@ -138,6 +148,16 @@ program
   .description('Trace a likely execution chain for a symbol')
   .option('-d, --depth <number>', 'Trace depth')
   .action(traceCommand);
+
+program
+  .command('impact <target>')
+  .description('Analyze likely impact for a file or symbol')
+  .action(impactCommand);
+
+program
+  .command('stale')
+  .description('Check whether the index is stale')
+  .action(staleCommand);
 
 program
   .command('remember <text>')

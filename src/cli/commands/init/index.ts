@@ -73,7 +73,7 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<voi
   logAgentSetupResult(setupResult);
 
   console.log(colors.green('\n✓ NanoContext initialized.'));
-  console.log(colors.dim('Run `nc scan` to index your project.\n'));
+  console.log(colors.dim('Run `nc watch -d` to start background auto-indexing.\n'));
 }
 
 async function selectAgents(container: Container): Promise<AgentDefinition[]> {

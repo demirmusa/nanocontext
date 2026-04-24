@@ -1,10 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import { IConfigManager } from '../interfaces/IConfigManager';
 import { IFileWatcher } from '../interfaces/IFileWatcher';
 import { ISyncService } from '../interfaces/IPipeline';
 import { SyncResult, SyncStep } from '../interfaces/types';
-import { FileWatcher } from '../watcher/FileWatcher';
+import { FileWatcher, WatchProcessInfo } from '../watcher/FileWatcher';
 
 export interface WatchUpdateStep {
   kind: 'step';
@@ -30,8 +31,16 @@ export interface WatchUpdateError {
 export type WatchUpdate = WatchUpdateStep | WatchUpdateResult | WatchUpdateError;
 
 export interface WatchStopResult {
-  status: 'stopped' | 'not_running' | 'stale_lock_removed';
+  status: 'stopped' | 'not_running';
   pid?: number;
+  projectRoot?: string;
+}
+
+export interface WatchStartDetachedResult {
+  pid: number | undefined;
+  projectRoot: string;
+  logPath: string;
+  errorLogPath: string;
 }
 
 export class WatchService {
@@ -48,6 +57,14 @@ export class WatchService {
     return FileWatcher.isWatchRunning(this.configManager.getProjectRoot());
   }
 
+  getRunningProjectWatch(): WatchProcessInfo | null {
+    return FileWatcher.getRunningProjectWatch(this.configManager.getProjectRoot());
+  }
+
+  listRunningWatches(): WatchProcessInfo[] {
+    return FileWatcher.listRunningWatches();
+  }
+
   async start(listener: (update: WatchUpdate) => void): Promise<void> {
     this.listeners = [listener];
 
@@ -61,25 +78,54 @@ export class WatchService {
     await this.fileWatcher.start();
   }
 
+  startDetached(cliPath: string): WatchStartDetachedResult {
+    const projectRoot = this.configManager.getProjectRoot();
+    const logDir = path.join(projectRoot, '.nanocontext', 'logs');
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+
+    const logPath = path.join(logDir, 'watch.out.log');
+    const errorLogPath = path.join(logDir, 'watch.err.log');
+    const out = fs.openSync(logPath, 'w');
+    const err = fs.openSync(errorLogPath, 'w');
+
+    const child = spawn(process.execPath, [cliPath, 'watch'], {
+      cwd: projectRoot,
+      detached: true,
+      stdio: ['ignore', out, err],
+      env: { ...process.env, NC_WATCH_LOG_PATH: logPath },
+      windowsHide: true,
+    });
+    child.unref();
+    fs.closeSync(out);
+    fs.closeSync(err);
+
+    if (child.pid !== undefined) {
+      FileWatcher.registerWatchInfo({
+        pid: child.pid,
+        projectRoot,
+        startedAt: new Date().toISOString(),
+        logPath,
+      });
+    }
+
+    return {
+      pid: child.pid,
+      projectRoot,
+      logPath,
+      errorLogPath,
+    };
+  }
+
   stop(): Promise<void> {
     this.listeners = [];
     return this.fileWatcher.stop();
   }
 
   stopRunningProcess(): WatchStopResult {
-    const lockPath = path.join(this.configManager.getProjectRoot(), '.nanocontext', 'watch.lock');
-    if (!fs.existsSync(lockPath)) {
-      return { status: 'not_running' };
-    }
-
-    try {
-      const pid = parseInt(fs.readFileSync(lockPath, 'utf-8').trim(), 10);
-      process.kill(pid, 'SIGTERM');
-      return { status: 'stopped', pid };
-    } catch {
-      try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
-      return { status: 'stale_lock_removed' };
-    }
+    const info = this.getRunningProjectWatch();
+    if (!info) return { status: 'not_running' };
+    FileWatcher.stopProjectWatch(info.projectRoot);
+    return { status: 'stopped', pid: info.pid, projectRoot: info.projectRoot };
   }
 
   private async handleFileChange(filePath: string): Promise<void> {

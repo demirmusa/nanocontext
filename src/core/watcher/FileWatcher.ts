@@ -1,5 +1,6 @@
 import * as chokidar from 'chokidar';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { minimatch } from 'minimatch';
 import { IFileWatcher } from '../interfaces/IFileWatcher';
@@ -7,6 +8,13 @@ import { IConfigManager } from '../interfaces/IConfigManager';
 import { IParserRegistry } from '../interfaces/IParser';
 import { ILogger } from '../interfaces/ILogger';
 import { normalizeProjectPath, ProjectPathError } from '../../utils/projectPath';
+
+export interface WatchProcessInfo {
+  pid: number;
+  projectRoot: string;
+  startedAt: string;
+  logPath: string;
+}
 
 export class FileWatcher implements IFileWatcher {
   private watcher: ReturnType<typeof chokidar.watch> | null = null;
@@ -139,28 +147,60 @@ export class FileWatcher implements IFileWatcher {
 
   private writeLockFile(): void {
     try {
-      fs.writeFileSync(this.lockFilePath, String(process.pid), 'utf-8');
+      const info = FileWatcher.createWatchInfo(this.configManager.getProjectRoot());
+      FileWatcher.registerWatchInfo(info);
     } catch { /* ignore */ }
   }
 
   private removeLockFile(): void {
+    const info = FileWatcher.readProjectWatchInfo(this.configManager.getProjectRoot());
     try {
       fs.unlinkSync(this.lockFilePath);
     } catch { /* ignore */ }
+    if (info) FileWatcher.removeWatchInfo(info.projectRoot);
   }
 
   static isWatchRunning(projectRoot: string): boolean {
-    const lockPath = path.join(projectRoot, '.nanocontext', 'watch.lock');
-    if (!fs.existsSync(lockPath)) return false;
-    try {
-      const pid = parseInt(fs.readFileSync(lockPath, 'utf-8').trim(), 10);
-      process.kill(pid, 0); // throws if process doesn't exist
-      return true;
-    } catch {
-      // Stale lock file — clean up
-      try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
-      return false;
+    return FileWatcher.getRunningProjectWatch(projectRoot) !== null;
+  }
+
+  static getRunningProjectWatch(projectRoot: string): WatchProcessInfo | null {
+    const info = FileWatcher.readProjectWatchInfo(projectRoot);
+    if (!info) return null;
+    if (FileWatcher.isPidRunning(info.pid)) return info;
+    FileWatcher.removeStaleProjectWatch(projectRoot);
+    return null;
+  }
+
+  static listRunningWatches(): WatchProcessInfo[] {
+    const infos = FileWatcher.readRegistry();
+    const running = infos.filter(info => FileWatcher.isPidRunning(info.pid));
+    if (running.length !== infos.length) {
+      FileWatcher.writeRegistry(running);
+      for (const info of infos) {
+        if (!running.includes(info)) FileWatcher.removeStaleProjectWatch(info.projectRoot);
+      }
     }
+    return running;
+  }
+
+  static stopProjectWatch(projectRoot: string): WatchProcessInfo | null {
+    const resolvedRoot = path.resolve(projectRoot);
+    const info = FileWatcher.getRunningProjectWatch(resolvedRoot);
+    if (!info) return null;
+    process.kill(info.pid, 'SIGTERM');
+    FileWatcher.removeWatchInfo(info.projectRoot);
+    try { fs.unlinkSync(FileWatcher.projectLockPath(resolvedRoot)); } catch { /* ignore */ }
+    return info;
+  }
+
+  static registerWatchInfo(info: WatchProcessInfo): void {
+    const resolvedInfo = { ...info, projectRoot: path.resolve(info.projectRoot) };
+    const lockPath = FileWatcher.projectLockPath(resolvedInfo.projectRoot);
+    const lockDir = path.dirname(lockPath);
+    if (!fs.existsSync(lockDir)) fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(lockPath, JSON.stringify(resolvedInfo, null, 2), 'utf-8');
+    FileWatcher.upsertWatchInfo(resolvedInfo);
   }
 
   private handleFileChange(filePath: string, debounceMs: number, projectRoot: string): void {
@@ -196,5 +236,76 @@ export class FileWatcher implements IFileWatcher {
         this.logger.error('Watcher callback error:', err);
       }
     }
+  }
+
+  private static createWatchInfo(projectRoot: string): WatchProcessInfo {
+    return {
+      pid: process.pid,
+      projectRoot: path.resolve(projectRoot),
+      startedAt: new Date().toISOString(),
+      logPath: process.env.NC_WATCH_LOG_PATH || path.join(projectRoot, '.nanocontext', 'logs', 'watch.out.log'),
+    };
+  }
+
+  private static projectLockPath(projectRoot: string): string {
+    return path.join(projectRoot, '.nanocontext', 'watch.lock');
+  }
+
+  private static registryPath(): string {
+    return path.join(os.homedir(), '.nanocontext', 'watchers.json');
+  }
+
+  private static readProjectWatchInfo(projectRoot: string): WatchProcessInfo | null {
+    const lockPath = FileWatcher.projectLockPath(projectRoot);
+    if (!fs.existsSync(lockPath)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(lockPath, 'utf-8')) as WatchProcessInfo;
+    } catch {
+      try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+      return null;
+    }
+  }
+
+  private static isPidRunning(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private static readRegistry(): WatchProcessInfo[] {
+    const registryPath = FileWatcher.registryPath();
+    if (!fs.existsSync(registryPath)) return [];
+    try {
+      const parsed = JSON.parse(fs.readFileSync(registryPath, 'utf-8')) as WatchProcessInfo[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private static writeRegistry(infos: WatchProcessInfo[]): void {
+    const registryPath = FileWatcher.registryPath();
+    const dir = path.dirname(registryPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(registryPath, JSON.stringify(infos, null, 2), 'utf-8');
+  }
+
+  private static upsertWatchInfo(info: WatchProcessInfo): void {
+    const infos = FileWatcher.readRegistry().filter(existing => existing.projectRoot !== info.projectRoot);
+    infos.push(info);
+    FileWatcher.writeRegistry(infos);
+  }
+
+  private static removeWatchInfo(projectRoot: string): void {
+    const resolvedRoot = path.resolve(projectRoot);
+    FileWatcher.writeRegistry(FileWatcher.readRegistry().filter(info => info.projectRoot !== resolvedRoot));
+  }
+
+  private static removeStaleProjectWatch(projectRoot: string): void {
+    try { fs.unlinkSync(FileWatcher.projectLockPath(projectRoot)); } catch { /* ignore */ }
+    FileWatcher.removeWatchInfo(projectRoot);
   }
 }

@@ -108,7 +108,7 @@ This project uses **NanoContext**, a code intelligence MCP server that provides 
 
 - When using NanoContext tools, do NOT add commentary or explanations about the tool calls. Execute them silently and use the results directly.
 - All file paths (f param) MUST be relative to project root. Never use absolute paths.
-- After editing files, call \`scan\` once to refresh the index. Use \`scan\` with \`f\` only when you want to refresh a specific file or glob.
+- At the beginning of a session, call \`watch\` once so changed files are auto-indexed in the background.
 
 ### Tools
 
@@ -129,11 +129,12 @@ NanoContext has a persistent memory store that survives across sessions. Use it 
 
 ### Workflow
 
-1. **Session start**: Call \`memories\` to load previous context
+1. **Session start**: Call \`watch\`, then call \`memories\` to load previous context
 2. **Before editing**: Start with \`search\`, \`symbol\`, or \`files\`, then open one strong hit with \`get\` or a header resource. Stop searching when one result is clearly right.
    Prefer one batched query call such as repeated query args over shell chaining multiple commands.
-3. **After editing**: Run \`scan\` to re-index all changed files at once
-4. **Important findings**: Call \`remember\` to persist context for future sessions
+3. **Before risky edits**: Call \`impact\` on the file or symbol to review callers, callees, likely tests, and memory notes.
+4. **After editing**: Let the background watcher refresh changed files. Call \`stale\` if you suspect the index is behind.
+5. **Important findings**: Call \`remember\` to persist context for future sessions
    Use symbol-scoped memory when the note belongs to one method or class.
 
 ### Playbooks
@@ -141,6 +142,7 @@ NanoContext has a persistent memory store that survives across sessions. Use it 
 - **Trace task**: \`search\` / \`symbol\` -> \`get\` -> \`refs\` / \`callees\` / \`trace\`
 - **Edit discovery**: \`search\` / \`symbol\` / \`files\` -> \`get <file>\` -> \`open <symbol>\`
 - **Impact review**: \`search\` / \`symbol\` -> \`callers\` / \`callees\` -> \`refs\`
+- **Change impact**: \`impact\` -> open likely callers/tests -> edit
 - **Durable notes**: \`remember\` with \`symbol\` for method/class notes, \`file\` for file-wide notes
 ${NANOCONTEXT_SECTION_END}`;
     }
@@ -153,7 +155,7 @@ This project uses **NanoContext**, a CLI-based code intelligence tool that provi
 ### Commands
 
 You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands:
-- \`nc scan\` / \`nc scan -f <file_or_glob>\`: Refresh the code index.
+- \`nc watch -d\`: Start background auto-indexing for this project. Run this once at session start.
 - \`nc search "<query>"\`: Perform text search across the codebase.
 - \`nc search --query "<a>" --query "<b>"\`: Batch related searches in one safe command instead of using shell chaining.
 - \`nc search -v "<query>"\`: Perform semantic search.
@@ -168,6 +170,8 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 - \`nc get <file>\`: Show a compact file summary with imports, classes, and methods.
 - \`nc get <file>[<start>-<end>]\`: Read raw file lines for a precise range.
 - \`nc refs <symbol>\` / \`nc callers <symbol>\` / \`nc callees <symbol>\` / \`nc trace <symbol>\`: Walk code flow intentionally.
+- \`nc impact <file_or_symbol>\`: Review callers, callees, same-file symbols, likely tests, and memory notes before a risky edit.
+- \`nc stale\`: Check whether the index is fresh when results look wrong or incomplete.
 - \`nc header <file>\` / \`nc peek <target>\` / \`nc open <target>\`: Use progressively wider read primitives.
 
 ### Rules
@@ -175,14 +179,14 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 - When using NanoContext tools, execute them using the CLI directly.
 - Never call bare tool names such as \`memories\`, \`remember\`, \`forget\`, \`search\`, or \`status\`. In CLI mode, always invoke NanoContext through \`nc <command>\`.
 - Prefer tool-native batching such as repeated \`--query\` flags instead of shell composition like \`cmd1 && cmd2\` or \`cmd1 | cmd2\`.
-- After editing or creating files, call \`nc scan\` to refresh the index.
+- At the beginning of a session, run \`nc watch -d\` once so changed files are auto-indexed in the background.
 - All file paths MUST be relative to project root. Never use absolute paths.
 
 ### Memory
 
 NanoContext has a persistent memory store that survives across sessions. Use it actively:
 
-- **Session start**: Run \`nc memories\` at the beginning of every session to load previous context.
+- **Session start**: Run \`nc watch -d\`, then run \`nc memories\` to load previous context.
 - **During work**: When you make an architectural decision or encounter an important pattern, run \`nc remember "<note>"\`.
 - **File notes**: When a finding is specific to one file, run \`nc remember "<note>" -f path\\to\\file.cs\`.
 - **Symbol notes**: When a finding belongs to one method or class, run \`nc remember "<note>" --symbol "Type#Member"\`.
@@ -190,16 +194,17 @@ NanoContext has a persistent memory store that survives across sessions. Use it 
 
 ### Workflow
 
-1. **Session start**: Run \`nc memories\`
+1. **Session start**: Run \`nc watch -d\`, then run \`nc memories\`
 2. **Before editing**: Use \`nc search\`, \`nc symbol\`, or \`nc files\` to find the target, then \`nc get <file>\` or \`nc open <symbol>\` to inspect it
-3. **After editing**: Run \`nc scan\` to re-index changed files
-4. **Important findings**: Call \`nc remember\` to persist context
+3. **Before risky edits**: Run \`nc impact <file_or_symbol>\` to review callers, callees, likely tests, and memory notes.
+4. **After editing**: Let the background watcher refresh changed files. Run \`nc stale\` if results look incomplete.
+5. **Important findings**: Call \`nc remember\` to persist context
 
 ### Playbooks
 
 - **Trace task**: \`nc search\` / \`nc symbol\` -> \`nc get <file>\` -> \`nc refs <symbol>\` / \`nc callees <symbol>\` / \`nc trace <symbol>\`
 - **Edit discovery**: \`nc search\` / \`nc symbol\` / \`nc files\` -> \`nc get <file>\` -> \`nc open <symbol>\`
-- **Review/impact**: \`nc search\` / \`nc symbol\` -> \`nc callers <symbol>\` / \`nc callees <symbol>\` -> \`nc refs <symbol>\`
+- **Review/impact**: \`nc search\` / \`nc symbol\` -> \`nc impact <file_or_symbol>\` -> \`nc open <likely_target>\`
 - **Durable notes**: \`nc remember --symbol\` for method/class notes, \`nc remember -f\` for file-wide notes
 ${NANOCONTEXT_SECTION_END}`;
   }

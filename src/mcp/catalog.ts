@@ -219,6 +219,29 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
     },
   },
   {
+    name: 'impact',
+    description: 'Change impact report for a file or symbol.',
+    params: '`target`',
+    docsDescription: 'Collect callers, callees, trace, same-file symbols, likely tests, and memory notes for a file or symbol.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'File path or symbol selector' },
+      },
+      required: ['target'],
+    },
+  },
+  {
+    name: 'stale',
+    description: 'Check index freshness.',
+    params: '—',
+    docsDescription: 'Report changed files, missing files, missing headers, pending insights, and vector/index mismatches.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
     name: 'scan',
     description: 'Scan project or a specific file.',
     params: '`f?`',
@@ -228,6 +251,16 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
       properties: {
         f: { type: 'string', description: 'File path or glob (omit for full scan)' },
       },
+    },
+  },
+  {
+    name: 'watch',
+    description: 'Start auto-indexing in the background.',
+    params: '—',
+    docsDescription: 'Start a detached watcher. If this project already has one, returns the existing watcher.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
     },
   },
   {
@@ -301,6 +334,7 @@ export function getMcpToolsForServer(): Array<Pick<McpToolDefinition, 'name' | '
 
 export function renderMcpToolMarkdownTable(): string {
   const rows = MCP_TOOL_DEFINITIONS
+    .filter(tool => tool.name !== 'scan')
     .map(tool => `| \`${tool.name}\` | ${tool.params} | ${tool.docsDescription} |`)
     .join('\n');
   return `| Tool | Params | What it does |\n|------|--------|--------------|\n${rows}`;

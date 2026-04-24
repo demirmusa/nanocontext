@@ -24,6 +24,8 @@ import { SearchService } from './services/SearchService';
 import { StatusService } from './services/StatusService';
 import { WatchService } from './services/WatchService';
 import { AgentSetupService } from './services/AgentSetupService';
+import { ImpactService } from './services/ImpactService';
+import { StaleService } from './services/StaleService';
 import { Logger } from '../utils/Logger';
 import { IConfigManager } from './interfaces/IConfigManager';
 import { IStateStore } from './interfaces/IStateStore';
@@ -64,6 +66,8 @@ export class Container {
   private _statusService: StatusService | null = null;
   private _watchService: WatchService | null = null;
   private _agentSetupService: AgentSetupService | null = null;
+  private _impactService: ImpactService | null = null;
+  private _staleService: StaleService | null = null;
   private _logger: ILogger | null = null;
   private _defaultSearchLimit: number = 5;
   private _initialized = false;
@@ -307,6 +311,32 @@ export class Container {
     return this._agentSetupService;
   }
 
+  get impactService(): ImpactService {
+    if (!this._impactService) {
+      this._impactService = new ImpactService(
+        this.configManager,
+        this.headerStore,
+        this.stateStore,
+        this.memoryStore,
+        this.codeReadService,
+        this.dependencyService,
+      );
+    }
+    return this._impactService;
+  }
+
+  get staleService(): StaleService {
+    if (!this._staleService) {
+      this._staleService = new StaleService(
+        this.configManager,
+        this.headerStore,
+        this.stateStore,
+        this.vectorStore,
+      );
+    }
+    return this._staleService;
+  }
+
   async initialize(): Promise<void> {
     if (this._initialized) return;
 
@@ -357,6 +387,8 @@ export class Container {
     this._searchService = null;
     this._statusService = null;
     this._watchService = null;
+    this._impactService = null;
+    this._staleService = null;
 
     this._initialized = true;
   }

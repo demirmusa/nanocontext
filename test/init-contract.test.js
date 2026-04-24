@@ -14,11 +14,11 @@ const agentSetupService = new AgentSetupService();
 test('generated init instructions mirror the MCP tool catalog', () => {
   const instructions = agentSetupService.getNanoContextInstructions();
 
-  for (const tool of MCP_TOOL_DEFINITIONS) {
+  for (const tool of MCP_TOOL_DEFINITIONS.filter(tool => tool.name !== 'scan')) {
     assert.match(instructions, new RegExp(`\\\`${tool.name}\\\``));
   }
 
-  for (const removedTool of ['search_deep', 'search_exact', 'search_regex', 'header', 'lines', 'methods', 'sync', 'watch', 'unwatch']) {
+  for (const removedTool of ['search_deep', 'search_exact', 'search_regex', 'header', 'lines', 'methods', 'sync', 'unwatch', 'watch_list', 'watch_stop', 'scan']) {
     assert.doesNotMatch(instructions, new RegExp(`\\\`${removedTool}\\\``));
   }
 
@@ -32,6 +32,10 @@ test('generated CLI init instructions mention new lookup and symbol-memory flows
   assert.match(instructions, /nc callees <symbol>/);
   assert.match(instructions, /nc remember "<text>" --symbol/);
   assert.match(instructions, /nc memories --symbol/);
+  assert.match(instructions, /nc watch -d/);
+  assert.match(instructions, /nc impact <file_or_symbol>/);
+  assert.match(instructions, /nc stale/);
+  assert.doesNotMatch(instructions, /nc scan/);
 });
 
 test('generated MCP configs stay workspace-portable', () => {

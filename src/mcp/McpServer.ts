@@ -186,6 +186,14 @@ export class McpServer {
             return json(await this.container.dependencyService.traceSymbol(args?.symbol as string, args?.d as number | undefined));
           }
 
+          case 'impact': {
+            return json(await this.container.impactService.analyze(args?.target as string));
+          }
+
+          case 'stale': {
+            return json(await this.container.staleService.inspect());
+          }
+
           case 'forget': {
             const ok = await this.container.memoryService.forget(args?.id as string);
             return text(ok ? 'ok' : 'not found');
@@ -196,8 +204,18 @@ export class McpServer {
               const result = await this.container.indexService.scanFiles([args.f as string]);
               return json(result.map(r => ({ f: r.file, a: r.action, u: r.methodsUpdated, add: r.methodsAdded, rm: r.methodsRemoved })));
             }
+            if (this.container.indexService.isWatchRunning()) {
+              return text('watch active; files are auto-indexed on save');
+            }
             const scanStats = await this.container.indexService.scanProject();
             return json({ f: scanStats.totalFiles, m: scanStats.totalMethods });
+          }
+
+          case 'watch': {
+            const existing = this.container.watchService.getRunningProjectWatch();
+            if (existing) return json({ status: 'running', pid: existing.pid, projectRoot: existing.projectRoot });
+            const result = this.container.watchService.startDetached(process.argv[1]);
+            return json({ status: 'started', pid: result.pid, projectRoot: result.projectRoot });
           }
 
           case 'status': {

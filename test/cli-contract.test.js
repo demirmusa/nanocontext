@@ -26,6 +26,8 @@ test('cli help exposes header, peek, and open read primitives', () => {
   assert.match(output, /\bcallers\b/);
   assert.match(output, /\bcallees\b/);
   assert.match(output, /\btrace\b/);
+  assert.match(output, /\bimpact\b/);
+  assert.match(output, /\bstale\b/);
 });
 
 test('memory command help exposes file-scoped flags', () => {
@@ -48,6 +50,25 @@ test('lookup command help exposes batched query flags', () => {
   assert.match(searchHelp, /--query <query\.\.\.>/);
   assert.match(symbolHelp, /--query <query\.\.\.>/);
   assert.match(filesHelp, /--query <query\.\.\.>/);
+});
+
+test('watch command help exposes detached and list modes without stop id', () => {
+  const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
+  const watchHelp = execFileSync(process.execPath, [cliPath, 'watch', '--help'], { encoding: 'utf-8' });
+  const stopHelp = execFileSync(process.execPath, [cliPath, 'watch', 'stop', '--help'], { encoding: 'utf-8' });
+
+  assert.match(watchHelp, /--detach/);
+  assert.match(watchHelp, /--list/);
+  assert.match(stopHelp, /Usage: nc watch stop \[options\]/);
+  assert.doesNotMatch(stopHelp, /watchId/);
+});
+
+test('MCP instructions tell agents about watch but not scan', () => {
+  const { AgentSetupService } = require('../dist/core/services/AgentSetupService');
+  const instructions = new AgentSetupService().getNanoContextInstructions('mcp');
+
+  assert.match(instructions, /`watch`/);
+  assert.doesNotMatch(instructions, /`scan`/);
 });
 
 test('get range renderer keeps only first and last line numbers for longer snippets', () => {

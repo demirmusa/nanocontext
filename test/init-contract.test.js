@@ -29,6 +29,7 @@ test('generated CLI init instructions mention new lookup and symbol-memory flows
   const instructions = agentSetupService.getNanoContextInstructions('cli');
 
   assert.match(instructions, /nc files \[query\]/);
+  assert.match(instructions, /nc agent-start/);
   assert.match(instructions, /nc callees <symbol>/);
   assert.match(instructions, /nc remember "<text>" --symbol/);
   assert.match(instructions, /nc memories --symbol/);
@@ -36,6 +37,7 @@ test('generated CLI init instructions mention new lookup and symbol-memory flows
   assert.match(instructions, /nc impact <file_or_symbol>/);
   assert.match(instructions, /nc stale/);
   assert.match(instructions, /nc ignore <path>/);
+  assert.match(instructions, /Do not repeatedly call `nc memories`/);
   assert.doesNotMatch(instructions, /nc scan/);
 });
 

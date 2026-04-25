@@ -153,14 +153,14 @@ ${renderMcpResourceMarkdownTable()}
 
 NanoContext has a persistent memory store that survives across sessions. Use it actively:
 
-- **Session start**: Call \`memories\` at the beginning of every session to load previous context, decisions, and notes.
+- **Session start**: Call \`memories\` once at the beginning of a session to load previous context, decisions, and notes. Do not repeat \`memories\` unless the user asks for refreshed saved context or you just wrote a memory and need to verify it.
 - **During work**: When you make an architectural decision, discover an important pattern, encounter a tricky bug, or learn something about the codebase that would be useful later — call \`remember\` immediately. Do not wait to be asked.
 - **What to remember**: Design decisions and their reasoning, important conventions, known issues and workarounds, relationships between components, user preferences for this project.
 - **Cleanup**: Use \`forget\` to remove outdated or incorrect memories.
 
 ### Workflow
 
-1. **Session start**: Call \`watch\`, then call \`memories\` to load previous context
+1. **Session start**: Call \`watch\`, then call \`memories\` once to load previous context.
 2. **Before editing**: Start with \`search\`, \`symbol\`, or \`files\`, then open one strong hit with \`get\` or a header resource. Stop searching when one result is clearly right.
    Prefer one batched query call such as repeated query args over shell chaining multiple commands.
 3. **Before risky edits**: Call \`impact\` on the file or symbol to review callers, callees, likely tests, and memory notes.
@@ -186,7 +186,8 @@ This project uses **NanoContext**, a CLI-based code intelligence tool that provi
 ### Commands
 
 You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands:
-- \`nc watch -d\`: Start background auto-indexing for this project. Run this once at session start.
+- \`nc watch -d\`: Start background auto-indexing for this project.
+- \`nc agent-start\`: Run this once at session start. It starts background auto-indexing and prints project memories in one command.
 - \`nc search "<query>"\`: Perform text search across the codebase.
 - \`nc search --query "<a>" --query "<b>"\`: Batch related searches in one safe command instead of using shell chaining.
 - \`nc search -v "<query>"\`: Perform semantic search.
@@ -211,14 +212,14 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 - When using NanoContext tools, execute them using the CLI directly.
 - Never call bare tool names such as \`memories\`, \`remember\`, \`forget\`, \`search\`, or \`status\`. In CLI mode, always invoke NanoContext through \`nc <command>\`.
 - Prefer tool-native batching such as repeated \`--query\` flags instead of shell composition like \`cmd1 && cmd2\` or \`cmd1 | cmd2\`.
-- At the beginning of a session, run \`nc watch -d\` once so changed files are auto-indexed in the background.
+- At the beginning of a session, run \`nc agent-start\` once so changed files are auto-indexed in the background and saved memories are loaded. Do not repeatedly call \`nc memories\`.
 - All file paths MUST be relative to project root. Never use absolute paths.
 
 ### Memory
 
 NanoContext has a persistent memory store that survives across sessions. Use it actively:
 
-- **Session start**: Run \`nc watch -d\`, then run \`nc memories\` to load previous context.
+- **Session start**: Run \`nc agent-start\` once to start background auto-indexing and load previous context. Use \`nc memories\` later only when the user asks for refreshed saved context or after writing a memory you need to verify.
 - **During work**: When you make an architectural decision or encounter an important pattern, run \`nc remember "<note>"\`.
 - **File notes**: When a finding is specific to one file, run \`nc remember "<note>" -f path\\to\\file.cs\`.
 - **Symbol notes**: When a finding belongs to one method or class, run \`nc remember "<note>" --symbol "Type#Member"\`.
@@ -226,7 +227,7 @@ NanoContext has a persistent memory store that survives across sessions. Use it 
 
 ### Workflow
 
-1. **Session start**: Run \`nc watch -d\`, then run \`nc memories\`
+1. **Session start**: Run \`nc agent-start\` once
 2. **Before editing**: Use \`nc search\`, \`nc symbol\`, or \`nc files\` to find the target, then \`nc get <file>\` or \`nc open <symbol>\` to inspect it
 3. **Before risky edits**: Run \`nc impact <file_or_symbol>\` to review callers, callees, likely tests, and memory notes.
 4. **After editing**: Let the background watcher refresh changed files. Run \`nc stale\` if results look incomplete.

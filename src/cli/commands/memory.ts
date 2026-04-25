@@ -68,7 +68,7 @@ export async function memoriesCommand(options: { search?: string; file?: string;
   }
 }
 
-function formatMemoryScope(memory: { symbol?: string; file?: string }): string {
+export function formatMemoryScope(memory: { symbol?: string; file?: string }): string {
   if (memory.symbol) {
     return colors.dim(` (${memory.symbol}${memory.file ? ` @ ${memory.file}` : ''})`);
   }

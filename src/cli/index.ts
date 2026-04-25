@@ -23,6 +23,7 @@ import { impactCommand } from './commands/impact';
 import { staleCommand } from './commands/stale';
 import { ignoreCommand } from './commands/ignore';
 import { removeCommand } from './commands/remove';
+import { agentStartCommand } from './commands/agent-start';
 
 const program = new Command();
 
@@ -75,6 +76,11 @@ watchCmd
   .command('stop')
   .description('Stop the running watch process')
   .action(watchStopCommand);
+
+program
+  .command('agent-start')
+  .description('Start background indexing and print project memories for agent session startup')
+  .action(agentStartCommand);
 
 program
   .command('search [query]')

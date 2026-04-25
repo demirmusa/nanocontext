@@ -31,6 +31,7 @@ test('cli help exposes header, peek, and open read primitives', () => {
   assert.match(output, /\btrace\b/);
   assert.match(output, /\bimpact\b/);
   assert.match(output, /\bstale\b/);
+  assert.match(output, /\bagent-start\b/);
   assert.match(output, /\bignore\b/);
   assert.match(output, /\bremove\b/);
 });

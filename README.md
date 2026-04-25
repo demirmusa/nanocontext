@@ -129,6 +129,14 @@ nc scan --rebuild-vectors  # regenerate all vector embeddings
 
 Run `nc scan` once right after `nc init`. That first scan is what turns the setup into usable context for the agent. Before it runs, the integration exists but the project index is still empty.
 
+### Agent session startup
+
+```bash
+nc agent-start  # start background watch and print saved project memories once
+```
+
+Agents should run `nc agent-start` once at session start. It replaces the repeated `nc watch -d` + `nc memories` startup pattern; use `nc memories` later only when you explicitly need to refresh saved context.
+
 ### Search
 
 ```bash

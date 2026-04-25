@@ -17,6 +17,12 @@ export interface AgentSetupResult {
   updatedAgentDocs: string[];
 }
 
+export interface AgentRemoveResult {
+  removedMcpConfigs: string[];
+  updatedAgentDocs: string[];
+  removedAgentDocs: string[];
+}
+
 const NANOCONTEXT_SECTION_MARKER = '<!-- nanocontext:start -->';
 const NANOCONTEXT_SECTION_END = '<!-- nanocontext:end -->';
 
@@ -91,6 +97,31 @@ export class AgentSetupService {
 
       const updatedDocs = this.updateAgentDocs(cwd, agent, mode);
       result.updatedAgentDocs.push(...updatedDocs);
+    }
+
+    return result;
+  }
+
+  removeSetup(cwd: string, agents: AgentDefinition[] = this.getAvailableAgents()): AgentRemoveResult {
+    const result: AgentRemoveResult = {
+      removedMcpConfigs: [],
+      updatedAgentDocs: [],
+      removedAgentDocs: [],
+    };
+
+    for (const agent of agents) {
+      if (this.removeMcpConfig(cwd, agent)) {
+        result.removedMcpConfigs.push(agent.mcpConfigPath);
+      }
+
+      for (const file of agent.agentMdFiles) {
+        const removal = this.removeAgentDocSection(cwd, file);
+        if (removal === 'removed') {
+          result.removedAgentDocs.push(file);
+        } else if (removal === 'updated') {
+          result.updatedAgentDocs.push(file);
+        }
+      }
     }
 
     return result;
@@ -172,6 +203,7 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 - \`nc refs <symbol>\` / \`nc callers <symbol>\` / \`nc callees <symbol>\` / \`nc trace <symbol>\`: Walk code flow intentionally.
 - \`nc impact <file_or_symbol>\`: Review callers, callees, same-file symbols, likely tests, and memory notes before a risky edit.
 - \`nc stale\`: Check whether the index is fresh when results look wrong or incomplete.
+- \`nc ignore <path>\`: Add generated, vendor, or noisy paths to \`.nanocontextignore\`.
 - \`nc header <file>\` / \`nc peek <target>\` / \`nc open <target>\`: Use progressively wider read primitives.
 
 ### Rules
@@ -245,8 +277,75 @@ ${NANOCONTEXT_SECTION_END}`;
     const fullPath = path.join(cwd, agent.mcpConfigPath);
     if (!fs.existsSync(fullPath)) return false;
 
-    fs.unlinkSync(fullPath);
+    if (agent.mcpConfigKind === 'json') {
+      return this.removeJsonMcpConfig(fullPath, cwd, agent.rootKey ?? 'mcpServers');
+    }
 
+    return this.removeTomlMcpConfig(fullPath, cwd);
+  }
+
+  private removeJsonMcpConfig(fullPath: string, cwd: string, rootKey: string): boolean {
+    let config: any;
+    try {
+      config = JSON.parse(fs.readFileSync(fullPath, 'utf-8'));
+    } catch {
+      return false;
+    }
+
+    if (!config?.[rootKey]?.nanocontext) return false;
+
+    delete config[rootKey].nanocontext;
+    if (Object.keys(config[rootKey]).length === 0) {
+      delete config[rootKey];
+    }
+
+    if (Object.keys(config).length === 0) {
+      this.removeFileAndEmptyParents(fullPath, cwd);
+    } else {
+      fs.writeFileSync(fullPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    }
+
+    return true;
+  }
+
+  private removeTomlMcpConfig(fullPath: string, cwd: string): boolean {
+    const content = fs.readFileSync(fullPath, 'utf-8');
+    const lines = content.split(/\r?\n/);
+    const kept: string[] = [];
+    let removed = false;
+    let skipping = false;
+
+    for (const line of lines) {
+      if (/^\s*\[mcp_servers\.nanocontext\]\s*$/.test(line)) {
+        removed = true;
+        skipping = true;
+        continue;
+      }
+
+      if (skipping && /^\s*\[/.test(line)) {
+        skipping = false;
+      }
+
+      if (!skipping) {
+        kept.push(line);
+      }
+    }
+
+    if (!removed) return false;
+
+    const updated = kept.join('\n').trim();
+
+    if (!updated) {
+      this.removeFileAndEmptyParents(fullPath, cwd);
+    } else {
+      fs.writeFileSync(fullPath, `${updated}\n`, 'utf-8');
+    }
+
+    return true;
+  }
+
+  private removeFileAndEmptyParents(fullPath: string, cwd: string): void {
+    fs.unlinkSync(fullPath);
     let currentDir = path.dirname(fullPath);
     while (currentDir.startsWith(cwd) && currentDir !== cwd) {
       if (fs.existsSync(currentDir) && fs.readdirSync(currentDir).length === 0) {
@@ -256,8 +355,6 @@ ${NANOCONTEXT_SECTION_END}`;
       }
       break;
     }
-
-    return true;
   }
 
   private updateAgentDocs(cwd: string, agent: AgentDefinition, mode: 'mcp' | 'cli'): string[] {
@@ -294,4 +391,32 @@ ${NANOCONTEXT_SECTION_END}`;
 
     return updatedFiles;
   }
+
+  private removeAgentDocSection(cwd: string, fileName: string): 'none' | 'updated' | 'removed' {
+    const filePath = path.join(cwd, fileName);
+    if (!fs.existsSync(filePath)) return 'none';
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const updated = removeNanoContextSection(content);
+    if (updated === content) return 'none';
+
+    if (!updated.trim()) {
+      fs.unlinkSync(filePath);
+      return 'removed';
+    }
+
+    fs.writeFileSync(filePath, updated.trimEnd() + '\n', 'utf-8');
+    return 'updated';
+  }
+}
+
+export function removeNanoContextSection(content: string): string {
+  const startIdx = content.indexOf(NANOCONTEXT_SECTION_MARKER);
+  const endIdx = content.indexOf(NANOCONTEXT_SECTION_END);
+  if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) {
+    return content;
+  }
+
+  return content.substring(0, startIdx).trimEnd()
+    + content.substring(endIdx + NANOCONTEXT_SECTION_END.length);
 }

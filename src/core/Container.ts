@@ -398,7 +398,7 @@ export class Container {
       await this._fileWatcher.stop();
     }
     this._memoryStore?.close();
-    this.stateStore.close();
+    this._stateStore?.close();
     this._initialized = false;
   }
 }

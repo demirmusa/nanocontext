@@ -21,6 +21,8 @@ import { traceCommand } from './commands/trace';
 import { clearCommand } from './commands/clear';
 import { impactCommand } from './commands/impact';
 import { staleCommand } from './commands/stale';
+import { ignoreCommand } from './commands/ignore';
+import { removeCommand } from './commands/remove';
 
 const program = new Command();
 
@@ -158,6 +160,17 @@ program
   .command('stale')
   .description('Check whether the index is stale')
   .action(staleCommand);
+
+program
+  .command('ignore <path>')
+  .description('Add a path or glob to .nanocontextignore')
+  .action(ignoreCommand);
+
+program
+  .command('remove')
+  .description('Remove NanoContext setup from this project')
+  .option('-y, --yes', 'Skip confirmation prompt')
+  .action(removeCommand);
 
 program
   .command('remember <text>')

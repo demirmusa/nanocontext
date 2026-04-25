@@ -1,9 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const { formatCompactSnippetLines } = require('../dist/cli/commands/get');
 const { FileDiscoveryService } = require('../dist/core/services/FileDiscoveryService');
+const { buildIgnoreEntry } = require('../dist/cli/commands/ignore');
 
 test('forget command help keeps the id argument optional', () => {
   const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
@@ -28,6 +31,8 @@ test('cli help exposes header, peek, and open read primitives', () => {
   assert.match(output, /\btrace\b/);
   assert.match(output, /\bimpact\b/);
   assert.match(output, /\bstale\b/);
+  assert.match(output, /\bignore\b/);
+  assert.match(output, /\bremove\b/);
 });
 
 test('memory command help exposes file-scoped flags', () => {
@@ -86,4 +91,20 @@ test('file discovery service lists and filters indexed files by partial name', (
 
   assert.deepEqual(service.list('Service'), ['src/AuthService.cs', 'src/UserService.cs']);
   assert.deepEqual(service.list(), ['README.md', 'src/AuthService.cs', 'src/UserService.cs']);
+});
+
+test('ignore command normalizes directories and globs relative to project root', () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocontext-ignore-'));
+  fs.mkdirSync(path.join(projectRoot, 'mobile', 'wwwroot', 'css', 'fontawesome'), { recursive: true });
+  const cwd = path.join(projectRoot, 'mobile');
+
+  assert.equal(
+    buildIgnoreEntry('.', projectRoot, cwd),
+    'mobile/**',
+  );
+  assert.equal(
+    buildIgnoreEntry(path.join('wwwroot', 'css', 'fontawesome'), projectRoot, cwd),
+    'mobile/wwwroot/css/fontawesome/**',
+  );
+  assert.equal(buildIgnoreEntry('**/*.min.js', projectRoot, cwd), '**/*.min.js');
 });

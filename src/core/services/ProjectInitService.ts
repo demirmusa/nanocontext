@@ -119,7 +119,7 @@ export class ProjectInitService {
     const changes: string[] = [];
     const ignorePath = path.join(cwd, '.nanocontextignore');
     if (!fs.existsSync(ignorePath)) {
-      fs.writeFileSync(ignorePath, '**/node_modules/**\n**/dist/**\n**/.git/**\n**/bin/**\n**/obj/**\n*.min.js\n*.bundle.js\n', 'utf-8');
+      fs.writeFileSync(ignorePath, '**/node_modules/**\n**/dist/**\n**/.git/**\n**/bin/**\n**/obj/**\n**/*.min.js\n**/*.bundle.js\n', 'utf-8');
       changes.push('.nanocontextignore');
     }
 

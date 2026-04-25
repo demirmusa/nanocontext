@@ -35,6 +35,7 @@ test('generated CLI init instructions mention new lookup and symbol-memory flows
   assert.match(instructions, /nc watch -d/);
   assert.match(instructions, /nc impact <file_or_symbol>/);
   assert.match(instructions, /nc stale/);
+  assert.match(instructions, /nc ignore <path>/);
   assert.doesNotMatch(instructions, /nc scan/);
 });
 
@@ -80,6 +81,7 @@ test('nc init supports non-interactive setup flags for benchmark automation', ()
   const projectConfig = JSON.parse(fs.readFileSync(path.join(projectRoot, 'nanocontextconfig.json'), 'utf-8'));
   const userConfig = JSON.parse(fs.readFileSync(path.join(projectRoot, '.nanocontext', 'config.json'), 'utf-8'));
   const codexConfig = fs.readFileSync(path.join(projectRoot, '.codex', 'config.toml'), 'utf-8');
+  const ignoreFile = fs.readFileSync(path.join(projectRoot, '.nanocontextignore'), 'utf-8');
 
   assert.deepEqual(projectConfig.include, ['Dapper/**/*.cs']);
   assert.equal(projectConfig.aiInsight, false);
@@ -87,6 +89,8 @@ test('nc init supports non-interactive setup flags for benchmark automation', ()
   assert.equal(userConfig.embedding.provider, 'none');
   assert.match(codexConfig, /mcp_servers\.nanocontext/);
   assert.match(codexConfig, /mcp-server/);
+  assert.match(ignoreFile, /\*\*\/\*\.min\.js/);
+  assert.match(ignoreFile, /\*\*\/\*\.bundle\.js/);
 });
 
 test('nc init in cli mode does not leave codex MCP config behind', () => {
@@ -168,4 +172,45 @@ test('nc init in mcp mode recreates codex MCP config after cli mode', () => {
   const agentsDoc = fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf-8');
   assert.match(agentsDoc, /## NanoContext MCP/);
   assert.doesNotMatch(agentsDoc, /## NanoContext CLI/);
+});
+
+test('nc remove deletes project setup and removes agent doc sections', () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocontext-remove-'));
+  fs.mkdirSync(path.join(projectRoot, 'Dapper'), { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, 'Dapper', 'SqlMapper.cs'), 'public class SqlMapper {}', 'utf-8');
+  fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), 'Keep this project note.\n', 'utf-8');
+  fs.writeFileSync(path.join(projectRoot, '.gitignore'), 'bin/\n.nanocontext/\n', 'utf-8');
+
+  const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
+
+  execFileSync(process.execPath, [
+    cliPath,
+    'init',
+    '--llm-provider', 'none',
+    '--embedding-provider', 'none',
+    '--include', 'Dapper/**/*.cs',
+    '--mode', 'mcp',
+    '--agents', 'codex',
+    '--yes',
+  ], { cwd: projectRoot, encoding: 'utf-8' });
+
+  assert.ok(fs.existsSync(path.join(projectRoot, 'nanocontextconfig.json')));
+  assert.ok(fs.existsSync(path.join(projectRoot, '.nanocontext')));
+  assert.ok(fs.existsSync(path.join(projectRoot, '.codex', 'config.toml')));
+  assert.match(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf-8'), /nanocontext:start/);
+
+  execFileSync(process.execPath, [cliPath, 'remove', '--yes'], { cwd: projectRoot, encoding: 'utf-8' });
+
+  assert.equal(fs.existsSync(path.join(projectRoot, 'nanocontextconfig.json')), false);
+  assert.equal(fs.existsSync(path.join(projectRoot, '.nanocontext')), false);
+  assert.equal(fs.existsSync(path.join(projectRoot, '.nanocontextignore')), false);
+  assert.equal(fs.existsSync(path.join(projectRoot, '.codex', 'config.toml')), false);
+
+  const agentsDoc = fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf-8');
+  assert.match(agentsDoc, /Keep this project note\./);
+  assert.doesNotMatch(agentsDoc, /nanocontext:start/);
+
+  const gitignore = fs.readFileSync(path.join(projectRoot, '.gitignore'), 'utf-8');
+  assert.match(gitignore, /bin\//);
+  assert.doesNotMatch(gitignore, /\.nanocontext\//);
 });

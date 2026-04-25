@@ -198,6 +198,18 @@ NanoContext Status
   Languages:         typescript, javascript
 ```
 
+### Project maintenance
+
+```bash
+nc ignore mobile/wwwroot/vendor      # append a project-relative ignore entry
+nc ignore .                          # ignore the current subdirectory
+nc clear                             # clear index data, keep NanoContext setup
+nc remove                            # remove NanoContext setup from the project
+nc remove --yes                      # remove without an interactive prompt
+```
+
+`nc remove` deletes `.nanocontext/`, `nanocontextconfig.json`, `.nanocontextignore`, NanoContext MCP entries, and the marked NanoContext sections in agent instruction files.
+
 ---
 
 ## MCP Integration
@@ -321,12 +333,13 @@ Gitignored. Stores API keys and provider settings.
 Works like `.gitignore`. One pattern per line:
 
 ```
-node_modules
-dist
-.git
-*.min.js
-__tests__
-*.spec.ts
+**/node_modules/**
+**/dist/**
+**/.git/**
+**/*.min.js
+**/*.bundle.js
+__tests__/**
+**/*.spec.ts
 ```
 
 </details>

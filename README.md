@@ -33,6 +33,7 @@ cd nanocontext && npm install && npm run build && npm link
 cd /path/to/your/project
 nc init       # interactive setup wizard
 nc scan       # index the codebase
+nc agent-start
 nc s "auth"   # search instantly
 nc symbol AuthService#BuildToken
 nc open AuthService#BuildToken
@@ -145,6 +146,7 @@ nc s "get.*User" -r                   # regex on names/signatures
 nc s "authentication logic" -v        # semantic vector search
 nc s "database connection" -v -d      # deep vector search (full header data)
 nc s "error handling" -l 10           # limit results (default: 3)
+nc search --query "FAQ" --query "Firebase"
 ```
 
 ### Read code
@@ -154,6 +156,9 @@ nc g src/auth/login.ts                # compact file summary
 nc g src/auth/login.ts[15-40]         # get lines 15-40 with line numbers
 nc peek LoginService.handleLogin      # compact symbol preview
 nc open LoginService.handleLogin      # wider symbol preview
+nc open src/auth/login.ts[15-80]      # wider raw line range preview
+nc open src/auth/login.ts --top       # open from the top of a file
+nc open LoginService.handleLogin --class
 nc refs LoginService.handleLogin      # direct refs/callees
 nc callees LoginService.handleLogin   # likely outbound calls
 nc callers LoginService.handleLogin   # likely inbound refs
@@ -165,7 +170,10 @@ nc inspect src/core/Container.ts      # full parsed structure of a file
 
 ```bash
 nc watch                   # auto-index on file save
+nc watch -d                # run watcher in the background
+nc watch --list            # list running watch processes
 nc watch stop              # stop from another terminal
+nc watch stop --all        # stop every registered watch process
 ```
 
 Watch mode shows real-time progress per pipeline step:
@@ -190,6 +198,8 @@ nc forget mem_abc123                  # delete
 nc forget --before 2026-01-01         # bulk delete older memories
 ```
 
+Memory lists include timestamps with date and time, for example `2026-04-26 02:15:03`.
+
 ### Status
 
 ```bash
@@ -209,6 +219,8 @@ NanoContext Status
 ### Project maintenance
 
 ```bash
+nc stop                              # pause embeddings and Smart Search for this project
+nc resume                            # restore paused embeddings and Smart Search
 nc ignore mobile/wwwroot/vendor      # append a project-relative ignore entry
 nc ignore .                          # ignore the current subdirectory
 nc clear                             # clear index data, keep NanoContext setup
@@ -217,6 +229,8 @@ nc remove --yes                      # remove without an interactive prompt
 ```
 
 `nc remove` deletes `.nanocontext/`, `nanocontextconfig.json`, `.nanocontextignore`, NanoContext MCP entries, and the marked NanoContext sections in agent instruction files.
+
+`nc stop` is a cost-control switch. It saves the current embedding provider under `.nanocontext/config.json`, sets embeddings to `none`, and disables Smart Search in `nanocontextconfig.json`. `nc resume` restores both. Existing exact, regex, file, symbol, and dependency commands continue to work while embeddings are stopped.
 
 ---
 
@@ -302,7 +316,12 @@ Created by `nc init`. Commit this to git.
   "exclude": ["node_modules", "dist", "*.test.*"],
   "aiInsight": true,
   "watch": { "debounceMs": 500 },
-  "search": { "defaultLimit": 3, "maxLimit": 50 },
+  "search": {
+    "defaultLimit": 3,
+    "maxLimit": 50,
+    "smartSearchEnabled": false,
+    "smartSearchCandidateMultiplier": 3
+  },
   "dependencyDepth": 2
 }
 ```
@@ -315,6 +334,9 @@ Created by `nc init`. Commit this to git.
 | `aiInsight` | Enable LLM keyword generation (Phase 2) |
 | `watch.debounceMs` | File watcher debounce delay (ms) |
 | `search.defaultLimit` | Default number of search results |
+| `search.maxLimit` | Maximum accepted search result limit |
+| `search.smartSearchEnabled` | Rerank vector candidates with the configured LLM |
+| `search.smartSearchCandidateMultiplier` | Candidate pool multiplier before Smart Search reranking |
 | `dependencyDepth` | How deep to follow call references |
 
 ### User Config — `.nanocontext/config.json`
@@ -335,6 +357,8 @@ Gitignored. Stores API keys and provider settings.
   }
 }
 ```
+
+When `nc stop` is used, NanoContext temporarily writes `pausedEmbedding` to this file and sets `embedding.provider` to `none`. `nc resume` removes `pausedEmbedding` and restores the saved provider.
 
 ### Ignore File — `.nanocontextignore`
 
@@ -366,6 +390,8 @@ No API key. Runs entirely on your machine.
 ollama pull llama3.2            # LLM
 ollama pull nomic-embed-text    # Embeddings
 ```
+
+For a full local embedding setup guide, including Docker and minimum system requirements, see [`example/README.md`](example/README.md).
 
 ### OpenAI
 

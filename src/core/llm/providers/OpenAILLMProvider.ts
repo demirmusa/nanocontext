@@ -12,7 +12,7 @@ export class OpenAILLMProvider implements ILLMProvider {
 
   constructor(config: LLMConfig) {
     this.client = new OpenAI({ apiKey: config.apiKey });
-    this.model = config.model || 'gpt-5-mini-2025-08-07';
+    this.model = config.model || 'gpt-5.4-mini';
   }
 
   async isAvailable(): Promise<boolean> {

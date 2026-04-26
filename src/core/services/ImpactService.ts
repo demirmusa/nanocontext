@@ -195,7 +195,7 @@ export class ImpactService {
   }
 
   private suggestNext(target: string, callers: TraceRelation[], callees: TraceRelation[]): string[] {
-    const suggestions = [`nc open ${target}`];
+    const suggestions = [`nc get ${target}`];
     if (callers.length > 0) suggestions.push(`nc callers ${target}`);
     if (callees.length > 0) suggestions.push(`nc callees ${target}`);
     return suggestions.slice(0, 3);

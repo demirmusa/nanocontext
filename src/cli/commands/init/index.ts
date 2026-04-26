@@ -48,6 +48,7 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<voi
     includePatterns: config.includePatterns,
     aiInsight: config.aiInsight,
     smartSearchEnabled: config.smartSearchEnabled,
+    aiInsightConcurrency: config.aiInsightConcurrency,
     llm: config.llm,
     embedding: config.embedding,
   });
@@ -73,7 +74,7 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<voi
   logAgentSetupResult(setupResult);
 
   console.log(colors.green('\n✓ NanoContext initialized.'));
-  console.log(colors.dim('Run `nc watch -d` to start background auto-indexing.\n'));
+  console.log(colors.dim('Run `nc scan` to index your project, then `nc watch -d` for background auto-indexing.\n'));
 }
 
 async function selectAgents(container: Container): Promise<AgentDefinition[]> {
@@ -133,6 +134,7 @@ interface PromptedProviderConfig {
   embedding: EmbeddingConfig;
   aiInsight: boolean;
   smartSearchEnabled: boolean;
+  aiInsightConcurrency?: number;
   includePatterns: string[];
 }
 
@@ -166,14 +168,15 @@ async function promptProviderConfig(detection: ProjectDetectionSummary): Promise
     llmConfig = { provider: 'ollama', endpoint, model };
     embeddingConfig = await promptEmbeddingConfig(llmConfig);
   } else if (llmProvider === 'codex-cli') {
-    llmConfig = { provider: 'codex-cli', model: 'codex-cli' };
+    const codexModel = await input({ message: 'Codex model:', default: 'gpt-5.4-mini' });
+    llmConfig = { provider: 'codex-cli', model: codexModel };
     embeddingConfig = await promptEmbeddingConfig(llmConfig);
   } else {
     console.log(colors.yellow(`⚠ Cloud LLM selected. Code snippets will be sent to ${llmProvider} servers.`));
     const apiKey = await input({ message: `${llmProvider} API key:` });
     const model = await input({
       message: 'Model:',
-      default: llmProvider === 'openai' ? 'gpt-5-mini-2025-08-07' : 'claude-haiku-4-5-20251001',
+      default: llmProvider === 'openai' ? 'gpt-5.4-mini' : 'claude-haiku-4-5-20251001',
     });
     llmConfig = { provider: llmProvider, apiKey, model };
     embeddingConfig = await promptEmbeddingConfig(llmConfig);
@@ -199,6 +202,7 @@ async function promptProviderConfig(detection: ProjectDetectionSummary): Promise
     embedding: embeddingConfig,
     aiInsight,
     smartSearchEnabled,
+    aiInsightConcurrency: llmProvider === 'codex-cli' ? 2 : undefined,
     includePatterns: includeInput.split(',').map(value => value.trim()).filter(Boolean),
   };
 }
@@ -253,11 +257,11 @@ async function resolveProviderConfigFromOptions(
     llmConfig = {
       provider: llmProvider,
       apiKey: options.llmApiKey || '',
-      model: options.llmModel || (llmProvider === 'openai' ? 'gpt-5-mini-2025-08-07' : 'claude-haiku-4-5-20251001'),
+      model: options.llmModel || (llmProvider === 'openai' ? 'gpt-5.4-mini' : 'claude-haiku-4-5-20251001'),
     };
     embeddingConfig = resolveEmbeddingConfigFromOptions(options, llmConfig);
   } else if (llmProvider === 'codex-cli') {
-    llmConfig = { provider: 'codex-cli', model: 'codex-cli' };
+    llmConfig = { provider: 'codex-cli', model: options.llmModel || 'gpt-5.4-mini' };
     embeddingConfig = resolveEmbeddingConfigFromOptions(options, llmConfig);
   } else {
     throw new Error(`Unsupported --llm-provider value: ${llmProvider}`);
@@ -268,6 +272,7 @@ async function resolveProviderConfigFromOptions(
     embedding: embeddingConfig,
     aiInsight,
     smartSearchEnabled: Boolean(options.smartSearch && llmProvider !== 'none'),
+    aiInsightConcurrency: llmProvider === 'codex-cli' ? 2 : undefined,
     includePatterns: resolveIncludePatterns(detection, options.include),
   };
 }

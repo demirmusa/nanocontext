@@ -88,10 +88,12 @@ export class FileWatcher implements IFileWatcher {
     const debounceMs = config.watch.debounceMs;
 
     this.watcher.on('change', (filePath: string) => {
+      this.logger.info(`Watcher change event: ${filePath}`);
       this.handleFileChange(filePath, debounceMs, projectRoot);
     });
 
     this.watcher.on('add', (filePath: string) => {
+      this.logger.info(`Watcher add event: ${filePath}`);
       this.handleFileChange(filePath, debounceMs, projectRoot);
     });
 

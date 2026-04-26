@@ -11,7 +11,6 @@ import { statusCommand } from './commands/status';
 import { mcpServerCommand } from './commands/mcp-server';
 import { getCommand } from './commands/get';
 import { peekCommand } from './commands/peek';
-import { openCommand } from './commands/open';
 import { symbolCommand } from './commands/symbol';
 import { filesCommand } from './commands/files';
 import { refsCommand } from './commands/refs';
@@ -127,13 +126,6 @@ program
   .description('Show a compact preview for a file or symbol')
   .action(peekCommand);
 
-program
-  .command('open <target>')
-  .description('Open a wider preview for a file or symbol')
-  .option('--around <lines>', 'Expand symbol preview by N surrounding lines')
-  .option('--class', 'Open the containing class when the target resolves to a method')
-  .option('--top', 'Open from the top of the file when the target is a file path')
-  .action(openCommand);
 
 program
   .command('symbol [query]')

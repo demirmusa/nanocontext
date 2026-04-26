@@ -32,7 +32,7 @@ export async function filesCommand(query: string | undefined, options: { query?:
       }
 
       if (files.length === 1) {
-        console.log(colors.dim(`next: nc open ${files[0]}`));
+        console.log(colors.dim(`next: nc get ${files[0]}`));
       }
     }
   } catch (err) {

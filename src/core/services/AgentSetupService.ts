@@ -207,7 +207,7 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 - \`nc impact <file_or_symbol>\`: Review callers, callees, same-file symbols, likely tests, and memory notes before a risky edit.
 - \`nc stale\`: Check whether the index is fresh when results look wrong or incomplete.
 - \`nc ignore <path>\`: Add generated, vendor, or noisy paths to \`.nanocontextignore\`.
-- \`nc header <file>\` / \`nc peek <target>\` / \`nc open <target>\`: Use progressively wider read primitives.
+- \`nc header <file>\` / \`nc peek <target>\` / \`nc get <target>\`: Use progressively wider read primitives.
 
 ### Rules
 
@@ -216,8 +216,8 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 - Prefer tool-native batching such as repeated \`--query\` flags instead of shell composition like \`cmd1 && cmd2\` or \`cmd1 | cmd2\`.
 - At the beginning of a session, run \`nc agent-start\` once so changed files are auto-indexed in the background and saved memories are loaded. Do not repeatedly call \`nc memories\`.
 - All file paths MUST be relative to project root. Never use absolute paths.
-- Do not use shell file readers such as \`sed\`, \`cat\`, \`grep\`, \`rg\`, or \`Get-Content\` for initial code discovery. Start with \`nc search\`, \`nc symbol\`, \`nc files\`, \`nc get\`, \`nc open\`, \`nc refs\`, \`nc callers\`, \`nc callees\`, \`nc trace\`, or \`nc impact\`.
-- Use raw shell file reads only after NanoContext has narrowed the target and \`nc get <file>[start-end]\` or \`nc open <file>[start-end]\` is not enough.
+- Do not use shell file readers such as \`sed\`, \`cat\`, \`grep\`, \`rg\`, or \`Get-Content\` for initial code discovery. Start with \`nc search\`, \`nc symbol\`, \`nc files\`, \`nc get\`, \`nc refs\`, \`nc callers\`, \`nc callees\`, \`nc trace\`, or \`nc impact\`.
+- Use raw shell file reads only after NanoContext has narrowed the target and \`nc get <file>[start-end]\` is not enough.
 
 ### Memory
 
@@ -232,7 +232,7 @@ NanoContext has a persistent memory store that survives across sessions. Use it 
 ### Workflow
 
 1. **Session start**: Run \`nc agent-start\` once
-2. **Before editing**: Use \`nc search\`, \`nc symbol\`, or \`nc files\` to find the target, then \`nc get <file>\` or \`nc open <symbol>\` to inspect it
+2. **Before editing**: Use \`nc search\`, \`nc symbol\`, or \`nc files\` to find the target, then \`nc get <file>\` to inspect it
 3. **Before risky edits**: Run \`nc impact <file_or_symbol>\` to review callers, callees, likely tests, and memory notes.
 4. **After editing**: Let the background watcher refresh changed files. Run \`nc stale\` if results look incomplete.
 5. **Important findings**: Call \`nc remember\` to persist context
@@ -240,8 +240,8 @@ NanoContext has a persistent memory store that survives across sessions. Use it 
 ### Playbooks
 
 - **Trace task**: \`nc search\` / \`nc symbol\` -> \`nc get <file>\` -> \`nc refs <symbol>\` / \`nc callees <symbol>\` / \`nc trace <symbol>\`
-- **Edit discovery**: \`nc search\` / \`nc symbol\` / \`nc files\` -> \`nc get <file>\` -> \`nc open <symbol>\`
-- **Review/impact**: \`nc search\` / \`nc symbol\` -> \`nc impact <file_or_symbol>\` -> \`nc open <likely_target>\`
+- **Edit discovery**: \`nc search\` / \`nc symbol\` / \`nc files\` -> \`nc get <file>\`
+- **Review/impact**: \`nc search\` / \`nc symbol\` -> \`nc impact <file_or_symbol>\` -> \`nc get <likely_target>\`
 - **Durable notes**: \`nc remember --symbol\` for method/class notes, \`nc remember -f\` for file-wide notes
 ${NANOCONTEXT_SECTION_END}`;
   }

@@ -8,6 +8,7 @@ export interface InitConfigInput {
   includePatterns: string[];
   aiInsight: boolean;
   smartSearchEnabled: boolean;
+  aiInsightConcurrency?: number;
   llm: LLMConfig;
   embedding: EmbeddingConfig;
 }
@@ -103,11 +104,17 @@ export class ProjectInitService {
 
   async saveInitConfig(cwd: string, input: InitConfigInput): Promise<void> {
     const configManager = new ConfigManager(cwd);
+    const existing = configManager.isInitialized() ? await configManager.loadProjectConfig() : null;
     const projectConfig = configManager.getDefaultProjectConfig();
     projectConfig.languages = input.languages;
     projectConfig.include = input.includePatterns;
     projectConfig.aiInsight = input.aiInsight;
     projectConfig.search.smartSearchEnabled = input.smartSearchEnabled;
+    if (existing?.aiInsightConcurrency !== undefined) {
+      projectConfig.aiInsightConcurrency = existing.aiInsightConcurrency;
+    } else if (input.aiInsightConcurrency !== undefined) {
+      projectConfig.aiInsightConcurrency = input.aiInsightConcurrency;
+    }
     await configManager.saveProjectConfig(projectConfig);
     await configManager.saveUserConfig({
       llm: input.llm,

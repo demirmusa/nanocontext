@@ -6,12 +6,15 @@ import { buildSmartSearchPrompt, parseSmartSearchResponse } from '../smartSearch
 
 export class CodexCliLLMProvider implements ILLMProvider {
   readonly name = 'codex-cli';
+  private readonly model: string;
 
-  constructor(_config?: unknown) {}
+  constructor(config?: { model?: string }) {
+    this.model = config?.model || 'gpt-5.4-mini';
+  }
 
   isAvailable(): Promise<boolean> {
     try {
-      const result = spawnSync('codex', ['--version'], { encoding: 'utf-8', timeout: 5000 });
+      const result = spawnSync('codex', ['--version'], { encoding: 'utf-8', timeout: 5000, shell: true });
       return Promise.resolve(result.status === 0);
     } catch {
       return Promise.resolve(false);
@@ -20,15 +23,13 @@ export class CodexCliLLMProvider implements ILLMProvider {
 
   async generateFileInsights(methods: { id: string; name: string; code: string }[], language: string): Promise<FileInsightResult> {
     const prompt = buildFileInsightPrompt(methods, language);
-    const content = this.runCodex(prompt);
-
-    const methodNames = methods.map(m => m.name).join(', ');
-    process.stdout.write(`[codex-cli] ${methods.length} method(s): ${methodNames}\n`);
-    process.stdout.write(`[codex-cli] response: ${content.slice(0, 200)}${content.length > 200 ? '...' : ''}\n`);
+    const { text, rawStdout } = this.runCodex(prompt);
 
     return {
-      insights: parseInsightResponse(content, methods),
-      rawResponse: content || '(empty)',
+      insights: parseInsightResponse(text, methods),
+      rawResponse: text || '(empty)',
+      prompt,
+      rawStdout,
     };
   }
 
@@ -38,20 +39,26 @@ export class CodexCliLLMProvider implements ILLMProvider {
     limit: number,
   ): Promise<SmartSearchSelectionResult> {
     const prompt = buildSmartSearchPrompt(query, candidates, limit);
-    const content = this.runCodex(prompt);
+    const { text } = this.runCodex(prompt);
 
     return {
-      selectedIds: parseSmartSearchResponse(content, candidates.map(c => c.id)),
-      rawResponse: content || '(empty)',
+      selectedIds: parseSmartSearchResponse(text, candidates.map(c => c.id)),
+      rawResponse: text || '(empty)',
     };
   }
 
-  private runCodex(prompt: string): string {
-    const result = spawnSync('codex', ['-q', prompt], {
-      encoding: 'utf-8',
-      timeout: 60000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+  private runCodex(prompt: string): { text: string; rawStdout: string } {
+    const result = spawnSync(
+      'codex',
+      ['--dangerously-bypass-approvals-and-sandbox', 'exec', '--json', '--ephemeral', '--ignore-user-config', '--skip-git-repo-check', '--model', this.model, '-'],
+      {
+        input: prompt,
+        encoding: 'utf-8',
+        timeout: 300000,
+        maxBuffer: 10 * 1024 * 1024,
+        shell: true,
+      },
+    );
 
     if (result.error) {
       throw new Error(`codex CLI error: ${result.error.message}`);
@@ -62,6 +69,19 @@ export class CodexCliLLMProvider implements ILLMProvider {
       throw new Error(`codex exited with code ${result.status}${stderr ? `: ${stderr}` : ''}`);
     }
 
-    return (result.stdout || '').trim();
+    const rawStdout = (result.stdout || '').trim();
+    const lines = rawStdout.split('\n').filter(l => l.trim());
+    let lastText = '';
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line) as { type?: string; item?: { type?: string; text?: string } };
+        if (event.type === 'item.completed' && event.item?.type === 'agent_message' && event.item.text) {
+          lastText = event.item.text;
+        }
+      } catch {
+        // ignore non-JSON lines
+      }
+    }
+    return { text: lastText || rawStdout, rawStdout };
   }
 }

@@ -3,6 +3,7 @@ import * as path from 'path';
 import { Container } from '../../core/Container';
 import { colors } from '../utils/colors';
 import { ScanProgress } from '../../core/interfaces/types';
+import { IndexRuntimeConfigSummary } from '../../core/services/IndexService';
 
 class ScanDisplay {
   private logPath: string;
@@ -115,12 +116,6 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
 
     console.log(colors.bold('Scanning project...\n'));
 
-    const phaseLabels: Record<string, string> = {
-      structure: 'Structure',
-      insight: 'AI Insight',
-      vectors: 'Vectors',
-    };
-
     const verbose = !!options.verbose;
     const display = new ScanDisplay(container.indexService.getProjectRoot());
     let currentPhase = '';
@@ -129,7 +124,12 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
     let insightErrorCount = 0;
 
     const runtimeConfig = await container.indexService.getRuntimeConfigSummary();
-    const useCodexCli = runtimeConfig.llmProvider === 'codex-cli';
+
+    const phaseLabels: Record<string, string> = {
+      structure: 'Structure',
+      insight: `AI Insight [${runtimeConfig.llmProvider} ${runtimeConfig.llmModel}]`,
+      vectors: `Vectors [${runtimeConfig.embeddingProvider} ${runtimeConfig.embeddingModel}]`,
+    };
 
     if (verbose) {
       display.log(`[CONFIG] resume=${!!options.resume} rebuildVectors=${!!options.rebuildVectors} verbose=true`);
@@ -142,7 +142,7 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
       // Phase transition — print summary of previous phase
       if (progress.phase !== currentPhase) {
         if (currentPhase && phaseSnapshot) {
-          display.printLine(phaseSummary(currentPhase, phaseSnapshot, display));
+          display.printLine(phaseSummary(currentPhase, phaseSnapshot, display, runtimeConfig));
           if (verbose) {
             display.log(`[PHASE END] ${currentPhase} — ${phaseSnapshot.processedFiles}/${phaseSnapshot.totalFiles} files`);
           }
@@ -165,20 +165,39 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
         const ir = progress.insightResult;
         if (ir.error) {
           insightErrorCount++;
-          if (verbose) display.log(`[INSIGHT ERROR] ${ir.file} (sent ${ir.sentCount} methods): ${ir.error}`);
-          if (useCodexCli) display.printLine(colors.red(`  [codex-cli] error ${ir.file}: ${ir.error}`));
+          display.log(`[INSIGHT ERROR] ${ir.file} (sent ${ir.sentCount} methods): ${ir.error}`);
+          if (ir.prompt) display.log(`[INSIGHT PROMPT] ${ir.file}\n${ir.prompt}`);
+          if (ir.rawStdout) display.log(`[INSIGHT RAW STDOUT] ${ir.file}\n${ir.rawStdout}`);
+          display.printLine(colors.red(`  [insight error] ${ir.file}: ${ir.error}`));
+          if (verbose) {
+            if (ir.prompt) display.printLine(colors.dim(`  [prompt →]\n${ir.prompt}`));
+            if (ir.rawStdout) display.printLine(colors.dim(`  [raw stdout →]\n${ir.rawStdout}`));
+          }
         } else if (ir.methods.length > 0) {
           insightSuccessCount++;
-          if (verbose) display.log(`[INSIGHT OK] ${ir.file} — sent ${ir.sentCount} methods, got ${ir.methods.length} results`);
-          if (useCodexCli) {
-            display.printLine(colors.dim(`  [codex-cli] ${ir.file} → ${ir.methods.map(m => m.name).join(', ')}`));
-            if (ir.rawResponse) display.printLine(colors.dim(`    ${ir.rawResponse.slice(0, 300)}${ir.rawResponse.length > 300 ? '...' : ''}`));
+          display.log(`[INSIGHT OK] ${ir.file} — sent ${ir.sentCount} methods, got ${ir.methods.length} results`);
+          if (ir.prompt) display.log(`[INSIGHT PROMPT] ${ir.file}\n${ir.prompt}`);
+          if (ir.rawStdout) display.log(`[INSIGHT RAW STDOUT] ${ir.file}\n${ir.rawStdout}`);
+          if (ir.rawResponse) display.log(`[INSIGHT PARSED] ${ir.file}\n${ir.rawResponse}`);
+          if (verbose) {
+            display.printLine(colors.dim(`  [insight ok] ${ir.file} → ${ir.methods.map(m => m.name).join(', ')}`));
+            if (ir.prompt) display.printLine(colors.dim(`  [prompt →]\n${ir.prompt}`));
+            if (ir.rawStdout) display.printLine(colors.dim(`  [raw stdout →]\n${ir.rawStdout}`));
+            if (ir.rawResponse) display.printLine(colors.dim(`  [parsed →] ${ir.rawResponse}`));
           }
         } else {
           insightErrorCount++;
-          if (verbose) display.log(`[INSIGHT EMPTY] ${ir.file} — sent ${ir.sentCount} methods, got 0 results`);
-          if (useCodexCli) display.printLine(colors.yellow(`  [codex-cli] empty response for ${ir.file} (${ir.sentCount} methods sent)`));
+          display.log(`[INSIGHT EMPTY] ${ir.file} — sent ${ir.sentCount} methods, got 0 results`);
+          if (ir.prompt) display.log(`[INSIGHT PROMPT] ${ir.file}\n${ir.prompt}`);
+          if (ir.rawStdout) display.log(`[INSIGHT RAW STDOUT] ${ir.file}\n${ir.rawStdout}`);
+          if (verbose) {
+            display.printLine(colors.yellow(`  [insight empty] ${ir.file} (${ir.sentCount} methods sent)`));
+            if (ir.prompt) display.printLine(colors.dim(`  [prompt →]\n${ir.prompt}`));
+            if (ir.rawStdout) display.printLine(colors.dim(`  [raw stdout →]\n${ir.rawStdout}`));
+          }
         }
+        // skip redundant bare status update when insight result is being reported
+        return;
       }
 
       // Build single-line status
@@ -199,7 +218,7 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
 
     // Final phase summary
     if (currentPhase && phaseSnapshot) {
-      display.printLine(phaseSummary(currentPhase, phaseSnapshot, display));
+      display.printLine(phaseSummary(currentPhase, phaseSnapshot, display, runtimeConfig));
     }
 
     console.log('');
@@ -222,7 +241,7 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
   }
 }
 
-function phaseSummary(phase: string, p: ScanProgress, display: ScanDisplay): string {
+function phaseSummary(phase: string, p: ScanProgress, display: ScanDisplay, cfg: IndexRuntimeConfigSummary): string {
   let detail: string;
   switch (phase) {
     case 'structure': {
@@ -245,6 +264,16 @@ function phaseSummary(phase: string, p: ScanProgress, display: ScanDisplay): str
       detail = `${p.totalFiles} files`;
   }
 
-  const label = phase === 'structure' ? 'Structure' : phase === 'insight' ? 'AI Insight' : phase === 'vectors' ? 'Vectors' : phase;
+  let label: string;
+  if (phase === 'structure') {
+    label = 'Structure';
+  } else if (phase === 'insight') {
+    label = `AI Insight [${cfg.llmProvider} ${cfg.llmModel}]`;
+  } else if (phase === 'vectors') {
+    label = `Vectors [${cfg.embeddingProvider} ${cfg.embeddingModel}]`;
+  } else {
+    label = phase;
+  }
+
   return colors.green(`✓ ${label}`) + ` ${colors.dim(`(${detail})`)}`;
 }

@@ -36,7 +36,6 @@ nc scan       # index the codebase
 nc agent-start
 nc s "auth"   # search instantly
 nc symbol AuthService#BuildToken
-nc open AuthService#BuildToken
 nc search --query "AuthService" --query "BuildToken"
 nc symbol --query "AuthService#BuildToken" --query "QueryAsync"
 nc files "AuthService"
@@ -155,10 +154,6 @@ nc search --query "FAQ" --query "Firebase"
 nc g src/auth/login.ts                # compact file summary
 nc g src/auth/login.ts[15-40]         # get lines 15-40 with line numbers
 nc peek LoginService.handleLogin      # compact symbol preview
-nc open LoginService.handleLogin      # wider symbol preview
-nc open src/auth/login.ts[15-80]      # wider raw line range preview
-nc open src/auth/login.ts --top       # open from the top of a file
-nc open LoginService.handleLogin --class
 nc refs LoginService.handleLogin      # direct refs/callees
 nc callees LoginService.handleLogin   # likely outbound calls
 nc callers LoginService.handleLogin   # likely inbound refs

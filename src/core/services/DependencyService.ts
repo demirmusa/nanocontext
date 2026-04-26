@@ -89,7 +89,7 @@ export class DependencyService {
       }),
       results: callers.slice(0, 5),
       related: callers.slice(5, 8),
-      suggestedNext: callers[0] ? `nc open ${callers[0].symbol}` : `nc callees ${resolved.displaySymbol}`,
+      suggestedNext: callers[0] ? `nc get ${callers[0].symbol}` : `nc callees ${resolved.displaySymbol}`,
       warning: resolved.warning,
     };
   }
@@ -137,7 +137,7 @@ export class DependencyService {
       }),
       results: results.slice(0, 5),
       related: related.slice(0, 5),
-      suggestedNext: results[0] ? `nc open ${results[0].symbol}` : `nc refs ${resolved.displaySymbol}`,
+      suggestedNext: results[0] ? `nc get ${results[0].symbol}` : `nc refs ${resolved.displaySymbol}`,
       warning: resolved.warning,
     };
   }
@@ -185,7 +185,7 @@ export class DependencyService {
       }),
       results: steps.slice(0, maxDepth),
       related: dedupedRelated.slice(0, 5),
-      suggestedNext: steps[1] ? `nc open ${steps[1].symbol}` : `nc callees ${resolved.displaySymbol}`,
+      suggestedNext: steps[1] ? `nc get ${steps[1].symbol}` : `nc callees ${resolved.displaySymbol}`,
       warning: resolved.warning,
     };
   }

@@ -9,6 +9,8 @@ export interface MethodInsight {
 export interface FileInsightResult {
   insights: MethodInsight[];
   rawResponse: string;
+  prompt?: string;
+  rawStdout?: string;
 }
 
 export interface SmartSearchSelectionResult {

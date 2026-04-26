@@ -251,5 +251,6 @@ export interface InsightGenerationResult {
   file: string;
   sentCount: number;
   methods: { id: string; name: string; insight: string }[];
+  rawResponse?: string;
   error?: string;
 }

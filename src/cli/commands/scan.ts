@@ -128,8 +128,10 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
     let insightSuccessCount = 0;
     let insightErrorCount = 0;
 
+    const runtimeConfig = await container.indexService.getRuntimeConfigSummary();
+    const useCodexCli = runtimeConfig.llmProvider === 'codex-cli';
+
     if (verbose) {
-      const runtimeConfig = await container.indexService.getRuntimeConfigSummary();
       display.log(`[CONFIG] resume=${!!options.resume} rebuildVectors=${!!options.rebuildVectors} verbose=true`);
       display.log(`[CONFIG] aiInsight=${runtimeConfig.aiInsight}`);
       display.log(`[CONFIG] llm.provider=${runtimeConfig.llmProvider} llm.model=${runtimeConfig.llmModel}`);
@@ -158,18 +160,24 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
         display.trackFile(progress.currentFile, !!progress.skipped);
       }
 
-      // Log insight results in verbose mode
-      if (verbose && progress.insightResult) {
+      // Log insight results
+      if (progress.insightResult) {
         const ir = progress.insightResult;
         if (ir.error) {
           insightErrorCount++;
-          display.log(`[INSIGHT ERROR] ${ir.file} (sent ${ir.sentCount} methods): ${ir.error}`);
+          if (verbose) display.log(`[INSIGHT ERROR] ${ir.file} (sent ${ir.sentCount} methods): ${ir.error}`);
+          if (useCodexCli) display.printLine(colors.red(`  [codex-cli] error ${ir.file}: ${ir.error}`));
         } else if (ir.methods.length > 0) {
           insightSuccessCount++;
-          display.log(`[INSIGHT OK] ${ir.file} — sent ${ir.sentCount} methods, got ${ir.methods.length} results`);
+          if (verbose) display.log(`[INSIGHT OK] ${ir.file} — sent ${ir.sentCount} methods, got ${ir.methods.length} results`);
+          if (useCodexCli) {
+            display.printLine(colors.dim(`  [codex-cli] ${ir.file} → ${ir.methods.map(m => m.name).join(', ')}`));
+            if (ir.rawResponse) display.printLine(colors.dim(`    ${ir.rawResponse.slice(0, 300)}${ir.rawResponse.length > 300 ? '...' : ''}`));
+          }
         } else {
           insightErrorCount++;
-          display.log(`[INSIGHT EMPTY] ${ir.file} — sent ${ir.sentCount} methods, got 0 results`);
+          if (verbose) display.log(`[INSIGHT EMPTY] ${ir.file} — sent ${ir.sentCount} methods, got 0 results`);
+          if (useCodexCli) display.printLine(colors.yellow(`  [codex-cli] empty response for ${ir.file} (${ir.sentCount} methods sent)`));
         }
       }
 

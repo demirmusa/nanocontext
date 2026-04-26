@@ -143,6 +143,7 @@ async function promptProviderConfig(detection: ProjectDetectionSummary): Promise
       { name: 'Ollama (local)', value: 'ollama' },
       { name: 'OpenAI', value: 'openai' },
       { name: 'Anthropic', value: 'anthropic' },
+      { name: 'Codex CLI (local, requires `codex` in PATH)', value: 'codex-cli' },
       { name: 'None (structure only)', value: 'none' },
     ],
   });
@@ -163,6 +164,9 @@ async function promptProviderConfig(detection: ProjectDetectionSummary): Promise
     });
     const model = await input({ message: 'Ollama model:', default: 'llama3.2' });
     llmConfig = { provider: 'ollama', endpoint, model };
+    embeddingConfig = await promptEmbeddingConfig(llmConfig);
+  } else if (llmProvider === 'codex-cli') {
+    llmConfig = { provider: 'codex-cli', model: 'codex-cli' };
     embeddingConfig = await promptEmbeddingConfig(llmConfig);
   } else {
     console.log(colors.yellow(`⚠ Cloud LLM selected. Code snippets will be sent to ${llmProvider} servers.`));
@@ -251,6 +255,9 @@ async function resolveProviderConfigFromOptions(
       apiKey: options.llmApiKey || '',
       model: options.llmModel || (llmProvider === 'openai' ? 'gpt-5-mini-2025-08-07' : 'claude-haiku-4-5-20251001'),
     };
+    embeddingConfig = resolveEmbeddingConfigFromOptions(options, llmConfig);
+  } else if (llmProvider === 'codex-cli') {
+    llmConfig = { provider: 'codex-cli', model: 'codex-cli' };
     embeddingConfig = resolveEmbeddingConfigFromOptions(options, llmConfig);
   } else {
     throw new Error(`Unsupported --llm-provider value: ${llmProvider}`);

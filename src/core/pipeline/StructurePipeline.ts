@@ -315,7 +315,7 @@ export class StructurePipeline implements IStructurePipeline {
     const methods = await this.collectMethodsMissingInsight(filePath, normalizedHeader, content);
     if (methods.length === 0) return null;
 
-    const { insights } = await this.llmProvider.generateFileInsights(methods, header.lang);
+    const { insights, rawResponse } = await this.llmProvider.generateFileInsights(methods, header.lang);
 
     let updated = false;
     for (const { methodId, insight } of insights) {
@@ -337,6 +337,7 @@ export class StructurePipeline implements IStructurePipeline {
       file: filePath,
       sentCount: methods.length,
       methods: insights.map(insight => ({ id: insight.methodId, name: insight.methodName, insight: insight.insight })),
+      rawResponse,
     };
   }
 

@@ -1,6 +1,6 @@
 import { Container } from '../../core/Container';
 import { colors } from '../utils/colors';
-import { formatMemoryScope } from './memory';
+import { formatMemoryScope, formatMemoryTimestamp } from './memory';
 
 export async function agentStartCommand(): Promise<void> {
   const container = new Container();
@@ -30,8 +30,7 @@ export async function agentStartCommand(): Promise<void> {
     }
 
     for (const memory of memories) {
-      const date = memory.createdAt.split('T')[0];
-      console.log(`  ${colors.cyan(memory.id)}  ${colors.dim(date)}  ${memory.text}${formatMemoryScope(memory)}`);
+      console.log(`  ${colors.cyan(memory.id)}  ${colors.dim(formatMemoryTimestamp(memory.createdAt))}  ${memory.text}${formatMemoryScope(memory)}`);
     }
   } catch (err) {
     console.error(colors.red(`Agent start failed: ${err instanceof Error ? err.message : String(err)}`));

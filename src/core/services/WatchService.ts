@@ -36,6 +36,10 @@ export interface WatchStopResult {
   projectRoot?: string;
 }
 
+export interface WatchStopAllResult {
+  stopped: WatchProcessInfo[];
+}
+
 export interface WatchStartDetachedResult {
   pid: number | undefined;
   projectRoot: string;
@@ -92,7 +96,7 @@ export class WatchService {
       cwd: projectRoot,
       detached: true,
       stdio: ['ignore', out, err],
-      env: { ...process.env, NC_WATCH_LOG_PATH: logPath },
+      env: { ...process.env, NC_WATCH_LOG_PATH: logPath, NC_WATCH_DETACHED_CHILD: '1' },
       windowsHide: true,
     });
     child.unref();
@@ -122,10 +126,16 @@ export class WatchService {
   }
 
   stopRunningProcess(): WatchStopResult {
-    const info = this.getRunningProjectWatch();
+    const info = this.getRunningProjectWatch()
+      ?? this.listRunningWatches().find(watch => path.resolve(watch.projectRoot) === path.resolve(this.configManager.getProjectRoot()))
+      ?? null;
     if (!info) return { status: 'not_running' };
     FileWatcher.stopProjectWatch(info.projectRoot);
     return { status: 'stopped', pid: info.pid, projectRoot: info.projectRoot };
+  }
+
+  stopAllRunningProcesses(): WatchStopAllResult {
+    return { stopped: FileWatcher.stopAllWatches() };
   }
 
   private async handleFileChange(filePath: string): Promise<void> {

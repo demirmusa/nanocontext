@@ -24,6 +24,7 @@ import { staleCommand } from './commands/stale';
 import { ignoreCommand } from './commands/ignore';
 import { removeCommand } from './commands/remove';
 import { agentStartCommand } from './commands/agent-start';
+import { resumeCommand, stopCommand } from './commands/embedding-control';
 
 const program = new Command();
 
@@ -75,12 +76,23 @@ const watchCmd = program
 watchCmd
   .command('stop')
   .description('Stop the running watch process')
+  .option('--all', 'Stop all running watch processes')
   .action(watchStopCommand);
 
 program
   .command('agent-start')
   .description('Start background indexing and print project memories for agent session startup')
   .action(agentStartCommand);
+
+program
+  .command('stop')
+  .description('Stop embedding provider calls for this project')
+  .action(stopCommand);
+
+program
+  .command('resume')
+  .description('Resume the previously stopped embedding provider')
+  .action(resumeCommand);
 
 program
   .command('search [query]')

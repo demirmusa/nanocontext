@@ -186,12 +186,32 @@ export class FileWatcher implements IFileWatcher {
 
   static stopProjectWatch(projectRoot: string): WatchProcessInfo | null {
     const resolvedRoot = path.resolve(projectRoot);
-    const info = FileWatcher.getRunningProjectWatch(resolvedRoot);
+    const info = FileWatcher.getRunningProjectWatch(resolvedRoot)
+      ?? FileWatcher.listRunningWatches().find(watch => path.resolve(watch.projectRoot) === resolvedRoot)
+      ?? null;
     if (!info) return null;
     process.kill(info.pid, 'SIGTERM');
     FileWatcher.removeWatchInfo(info.projectRoot);
     try { fs.unlinkSync(FileWatcher.projectLockPath(resolvedRoot)); } catch { /* ignore */ }
     return info;
+  }
+
+  static stopAllWatches(): WatchProcessInfo[] {
+    const watches = FileWatcher.listRunningWatches();
+    const stopped: WatchProcessInfo[] = [];
+
+    for (const watch of watches) {
+      try {
+        process.kill(watch.pid, 'SIGTERM');
+        stopped.push(watch);
+      } catch {
+        // Treat vanished processes as cleaned up below.
+      }
+      FileWatcher.removeWatchInfo(watch.projectRoot);
+      try { fs.unlinkSync(FileWatcher.projectLockPath(watch.projectRoot)); } catch { /* ignore */ }
+    }
+
+    return stopped;
   }
 
   static registerWatchInfo(info: WatchProcessInfo): void {

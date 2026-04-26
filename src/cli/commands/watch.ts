@@ -12,7 +12,9 @@ export async function watchCommand(options: { detach?: boolean } = {}): Promise<
     process.exit(1);
   }
 
-  if (container.watchService.isRunning()) {
+  const isDetachedChild = process.env.NC_WATCH_DETACHED_CHILD === '1';
+
+  if (!isDetachedChild && container.watchService.isRunning()) {
     const info = container.watchService.getRunningProjectWatch();
     if (!options.detach && info) {
       attachToWatchLog(info);
@@ -62,8 +64,23 @@ export function watchListCommand(): void {
   }
 }
 
-export function watchStopCommand(): void {
+export function watchStopCommand(options: { all?: boolean } = {}): void {
   const container = new Container();
+
+  if (options.all) {
+    const result = container.watchService.stopAllRunningProcesses();
+    if (result.stopped.length === 0) {
+      console.log(colors.yellow('No watch processes are running.'));
+      return;
+    }
+
+    console.log(colors.green(`Stopped ${result.stopped.length} watch process${result.stopped.length === 1 ? '' : 'es'}.`));
+    for (const watch of result.stopped) {
+      console.log(colors.dim(`  pid ${watch.pid}  ${watch.projectRoot}`));
+    }
+    return;
+  }
+
   const result = container.watchService.stopRunningProcess();
 
   if (result.status === 'not_running') {

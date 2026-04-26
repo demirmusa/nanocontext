@@ -68,8 +68,6 @@ export async function getCommand(target: string, options: { around?: string } = 
         console.log(colors.yellow(summary.warning));
       }
       renderMemories(summary.memories);
-
-      console.log(colors.dim('Tip: use `nc get <file>[start-end]` to open raw lines.'));
       return;
     }
 

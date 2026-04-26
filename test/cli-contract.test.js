@@ -32,8 +32,61 @@ test('cli help exposes header, peek, and open read primitives', () => {
   assert.match(output, /\bimpact\b/);
   assert.match(output, /\bstale\b/);
   assert.match(output, /\bagent-start\b/);
+  assert.match(output, /\bstop\b/);
+  assert.match(output, /\bresume\b/);
   assert.match(output, /\bignore\b/);
   assert.match(output, /\bremove\b/);
+});
+
+test('stop and resume toggle embedding config without losing provider settings', () => {
+  const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocontext-embedding-toggle-'));
+  fs.writeFileSync(
+    path.join(projectRoot, 'nanocontextconfig.json'),
+    JSON.stringify({
+      version: 1,
+      languages: ['typescript'],
+      include: ['src/**/*'],
+      exclude: [],
+      aiInsight: false,
+      aiInsightConcurrency: 1,
+      watch: { debounceMs: 100 },
+      search: { defaultLimit: 3, maxLimit: 20, smartSearchEnabled: true },
+      dependencyDepth: 1,
+    }, null, 2),
+    'utf-8',
+  );
+  fs.mkdirSync(path.join(projectRoot, '.nanocontext'), { recursive: true });
+  fs.writeFileSync(
+    path.join(projectRoot, '.nanocontext', 'config.json'),
+    JSON.stringify({
+      llm: { provider: 'none', model: 'disabled' },
+      embedding: {
+        provider: 'openai',
+        apiKey: 'test-key',
+        model: 'text-embedding-3-small',
+      },
+    }, null, 2),
+    'utf-8',
+  );
+
+  execFileSync(process.execPath, [cliPath, 'stop'], { cwd: projectRoot, encoding: 'utf-8' });
+  const stopped = JSON.parse(fs.readFileSync(path.join(projectRoot, '.nanocontext', 'config.json'), 'utf-8'));
+  const stoppedProject = JSON.parse(fs.readFileSync(path.join(projectRoot, 'nanocontextconfig.json'), 'utf-8'));
+  assert.equal(stopped.embedding.provider, 'none');
+  assert.equal(stopped.pausedEmbedding.provider, 'openai');
+  assert.equal(stopped.pausedEmbedding.apiKey, 'test-key');
+  assert.equal(stoppedProject.search.smartSearchEnabled, false);
+  assert.equal(stoppedProject.search.pausedSmartSearchEnabled, true);
+
+  execFileSync(process.execPath, [cliPath, 'resume'], { cwd: projectRoot, encoding: 'utf-8' });
+  const resumed = JSON.parse(fs.readFileSync(path.join(projectRoot, '.nanocontext', 'config.json'), 'utf-8'));
+  const resumedProject = JSON.parse(fs.readFileSync(path.join(projectRoot, 'nanocontextconfig.json'), 'utf-8'));
+  assert.equal(resumed.embedding.provider, 'openai');
+  assert.equal(resumed.embedding.apiKey, 'test-key');
+  assert.equal(resumed.pausedEmbedding, undefined);
+  assert.equal(resumedProject.search.smartSearchEnabled, true);
+  assert.equal(resumedProject.search.pausedSmartSearchEnabled, undefined);
 });
 
 test('memory command help exposes file-scoped flags', () => {
@@ -66,6 +119,7 @@ test('watch command help exposes detached and list modes without stop id', () =>
   assert.match(watchHelp, /--detach/);
   assert.match(watchHelp, /--list/);
   assert.match(stopHelp, /Usage: nc watch stop \[options\]/);
+  assert.match(stopHelp, /--all/);
   assert.doesNotMatch(stopHelp, /watchId/);
 });
 

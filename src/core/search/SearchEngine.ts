@@ -47,7 +47,7 @@ export class SearchEngine implements ISearchEngine {
           score: lexicalBoostScore(query, result) + (typeof result.score === 'number' ? Math.max(0, 1 - result.score) : 0),
         })));
       } catch (err) {
-        this.logger.error('Vector search failed:', err);
+        this.logger.debug('Vector search skipped:', err instanceof Error ? err.message : String(err));
       }
     }
 

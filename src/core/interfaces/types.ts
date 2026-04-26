@@ -145,6 +145,7 @@ export interface ProjectConfig {
     maxLimit: number;
     smartSearchEnabled?: boolean;
     smartSearchCandidateMultiplier?: number;
+    pausedSmartSearchEnabled?: boolean;
   };
   dependencyDepth: number;
 }
@@ -152,6 +153,7 @@ export interface ProjectConfig {
 export interface UserConfig {
   llm: LLMConfig;
   embedding: EmbeddingConfig;
+  pausedEmbedding?: EmbeddingConfig;
 }
 
 export interface LLMConfig {

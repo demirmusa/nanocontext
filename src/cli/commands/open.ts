@@ -1,4 +1,5 @@
 import { Container } from '../../core/Container';
+import { ResolvedSymbolSnippetResult } from '../../core/services/CodeReadService';
 import { colors } from '../utils/colors';
 
 export async function openCommand(
@@ -6,6 +7,7 @@ export async function openCommand(
   options: { around?: string; class?: boolean; top?: boolean } = {},
 ): Promise<void> {
   const container = new Container();
+  const rangeMatch = target.match(/^(.+)\[(\d+)-(\d+)\]$/);
 
   if (!container.configManager.isInitialized()) {
     console.log(colors.red('Project not initialized. Run `nc init` first.'));
@@ -14,11 +16,20 @@ export async function openCommand(
 
   try {
     await container.initialize();
-    const resolved = await container.codeReadService.openTarget(target, {
-      around: parseAroundOption(options.around, 12),
-      classContext: options.class,
-      top: options.top,
-    });
+    const resolved = rangeMatch
+      ? await readExplicitRange(container, rangeMatch, options)
+      : await container.codeReadService.openTarget(target, {
+        around: parseAroundOption(options.around, 12),
+        classContext: options.class,
+        top: options.top,
+      });
+
+    if (resolved.snippet.error) {
+      throw new Error(resolved.snippet.error);
+    }
+    if (resolved.snippet.warning) {
+      console.warn(colors.yellow(resolved.snippet.warning));
+    }
 
     console.log(colors.bold(`\n${resolved.target.file}`) + colors.dim(` [${resolved.target.loc}] open`));
     if (resolved.target.sig) {
@@ -64,4 +75,27 @@ function parseAroundOption(value: string | undefined, fallback: number): number 
 
   const parsed = parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+async function readExplicitRange(
+  container: Container,
+  match: RegExpMatchArray,
+  options: { around?: string },
+): Promise<ResolvedSymbolSnippetResult> {
+  const [, filePath, startStr, endStr] = match;
+  const start = parseInt(startStr, 10);
+  const end = parseInt(endStr, 10);
+
+  if (start > end || start < 1) {
+    throw new Error(`Invalid line range: ${start}-${end}`);
+  }
+
+  const loc = `${start}-${end}`;
+  const around = parseAroundOption(options.around, 0);
+  return around > 0
+    ? container.codeReadService.readSnippetAround(filePath, loc, around)
+    : {
+      target: { file: filePath, symbol: filePath, loc, type: 'class' },
+      snippet: container.codeReadService.readSnippet(filePath, loc),
+    };
 }

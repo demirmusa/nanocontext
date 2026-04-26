@@ -57,8 +57,7 @@ export async function memoriesCommand(options: { search?: string; file?: string;
     }
 
     for (const m of memories) {
-      const date = m.createdAt.split('T')[0];
-      console.log(`  ${colors.cyan(m.id)}  ${colors.dim(date)}  ${m.text}${formatMemoryScope(m)}`);
+      console.log(`  ${colors.cyan(m.id)}  ${colors.dim(formatMemoryTimestamp(m.createdAt))}  ${m.text}${formatMemoryScope(m)}`);
     }
   } catch (err) {
     console.error(colors.red(`Failed: ${err}`));
@@ -76,6 +75,15 @@ export function formatMemoryScope(memory: { symbol?: string; file?: string }): s
     return colors.dim(` (${memory.file})`);
   }
   return '';
+}
+
+export function formatMemoryTimestamp(createdAt: string): string {
+  const parsed = new Date(createdAt);
+  if (Number.isNaN(parsed.getTime())) {
+    return createdAt;
+  }
+
+  return parsed.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
 }
 
 export async function forgetCommand(id: string | undefined, options: { before?: string }): Promise<void> {

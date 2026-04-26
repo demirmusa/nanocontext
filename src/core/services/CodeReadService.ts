@@ -71,7 +71,6 @@ export class CodeReadService {
         classes: [],
         methods: [],
         memories: await this.memoryStore.listByFile(relativePath),
-        warning: `No header found for ${relativePath}. Run \`nc scan -f ${relativePath}\` to generate structure metadata.`,
       };
     }
 

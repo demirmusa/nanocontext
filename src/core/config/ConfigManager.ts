@@ -44,6 +44,7 @@ export class ConfigManager implements IConfigManager {
       embedding: parsed.embedding?.provider === 'none'
         ? { ...disabled.embedding, ...parsed.embedding }
         : { ...defaults.embedding, ...parsed.embedding },
+      pausedEmbedding: parsed.pausedEmbedding,
     };
   }
 

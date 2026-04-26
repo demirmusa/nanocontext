@@ -166,11 +166,11 @@ function renderSelectedRun() {
 
   selectedRunCards.innerHTML = '';
   [
-    ['NC Token Savings', formatPercent(ratioOrNull(run.comparison?.comparison?.nanocontextVsBaselineTotalTokenSavings, totalTokens(run.conditions.baseline?.usage))), 'baseline total token reduction'],
+    ['NC Token Savings', formatPercent(tokenSavingsRatio(run.conditions.baseline?.usage, run.conditions.nanocontext?.usage)), 'baseline total token reduction'],
     ['NC Non-Cached Savings', formatPercent(nonCachedSavingsRatio(run.conditions.baseline?.usage, run.conditions.nanocontext?.usage)), 'cached input excluded'],
-    ['SmartSearch Token Savings', formatPercent(ratioOrNull(run.comparison?.comparison?.smartsearchVsBaselineTotalTokenSavings, totalTokens(run.conditions.baseline?.usage))), 'baseline total token reduction'],
+    ['SmartSearch Token Savings', formatPercent(tokenSavingsRatio(run.conditions.baseline?.usage, run.conditions['nanocontext-smartsearch']?.usage)), 'baseline total token reduction'],
     ['SmartSearch Non-Cached Savings', formatPercent(nonCachedSavingsRatio(run.conditions.baseline?.usage, run.conditions['nanocontext-smartsearch']?.usage)), 'cached input excluded'],
-    ['Smart vs NC Gain', formatPercent(ratioOrNull(run.comparison?.comparison?.smartsearchVsNanocontextTotalTokenSavings, totalTokens(run.conditions.nanocontext?.usage))), 'extra reduction vs normal NC'],
+    ['Smart vs NC Gain', formatPercent(tokenSavingsRatio(run.conditions.nanocontext?.usage, run.conditions['nanocontext-smartsearch']?.usage)), 'extra reduction vs normal NC'],
     ['Smart vs NC Non-Cached Gain', formatPercent(nonCachedDeltaRatio(run.conditions.nanocontext?.usage, run.conditions['nanocontext-smartsearch']?.usage)), 'cached input excluded'],
   ].forEach(([label, value, subtext]) => {
     selectedRunCards.appendChild(createMetricCard(label, value, subtext));
@@ -297,17 +297,17 @@ function buildAggregateAnalytics(runs) {
       },
       nanocontext: {
         avgTokens: nanocontextAvg,
-        avgSavingsRatio: ratioOrNull((baselineAvg - nanocontextAvg), baselineAvg),
+        avgSavingsRatio: deltaRatioOrNull(baselineAvg, nanocontextAvg),
         avgNonCachedTokens: nanocontextNonCachedAvg,
-        avgNonCachedSavingsRatio: ratioOrNull((baselineNonCachedAvg - nanocontextNonCachedAvg), baselineNonCachedAvg),
+        avgNonCachedSavingsRatio: deltaRatioOrNull(baselineNonCachedAvg, nanocontextNonCachedAvg),
       },
       smartsearch: {
         avgTokens: smartsearchAvg,
-        avgSavingsRatio: ratioOrNull((baselineAvg - smartsearchAvg), baselineAvg),
+        avgSavingsRatio: deltaRatioOrNull(baselineAvg, smartsearchAvg),
         avgNonCachedTokens: smartsearchNonCachedAvg,
-        avgNonCachedSavingsRatio: ratioOrNull((baselineNonCachedAvg - smartsearchNonCachedAvg), baselineNonCachedAvg),
-        avgSavingsVsNanoRatio: ratioOrNull((nanocontextAvg - smartsearchAvg), nanocontextAvg),
-        avgNonCachedSavingsVsNanoRatio: ratioOrNull((nanocontextNonCachedAvg - smartsearchNonCachedAvg), nanocontextNonCachedAvg),
+        avgNonCachedSavingsRatio: deltaRatioOrNull(baselineNonCachedAvg, smartsearchNonCachedAvg),
+        avgSavingsVsNanoRatio: deltaRatioOrNull(nanocontextAvg, smartsearchAvg),
+        avgNonCachedSavingsVsNanoRatio: deltaRatioOrNull(nanocontextNonCachedAvg, smartsearchNonCachedAvg),
       },
     };
   }).sort((a, b) => a.benchmarkId.localeCompare(b.benchmarkId));
@@ -343,6 +343,9 @@ function renderConditionPanel(conditionName, summary) {
 
   const badges = fragment.querySelector('.condition-badges');
   badges.appendChild(createBadge(`Exit ${summary.exitCode}`, summary.exitCode === 0 ? 'good' : 'bad'));
+  if (!hasUsage(summary.usage)) {
+    badges.appendChild(createBadge('No usage', 'warn'));
+  }
   badges.appendChild(createBadge(`${formatNumber(totalTokens(summary.usage))} tokens`));
   badges.appendChild(createBadge(`${formatNumber(summary.durationMs)} ms`));
 
@@ -437,25 +440,38 @@ function createBadge(label, variant = '') {
 }
 
 function totalTokens(usage) {
-  if (!usage) return null;
-  return safeNumber(usage.input_tokens) + safeNumber(usage.output_tokens);
+  if (!hasUsage(usage)) return null;
+  return Number(usage.input_tokens) + Number(usage.output_tokens);
 }
 
 function nonCachedTokens(usage) {
-  if (!usage) return null;
-  return Math.max(0, safeNumber(usage.input_tokens) - safeNumber(usage.cached_input_tokens)) + safeNumber(usage.output_tokens);
+  if (!hasUsage(usage)) return null;
+  return Math.max(0, Number(usage.input_tokens) - safeNumber(usage.cached_input_tokens)) + Number(usage.output_tokens);
+}
+
+function tokenSavingsRatio(baselineUsage, comparedUsage) {
+  return deltaRatioOrNull(totalTokens(baselineUsage), totalTokens(comparedUsage));
 }
 
 function nonCachedSavingsRatio(baselineUsage, comparedUsage) {
-  const baseline = nonCachedTokens(baselineUsage);
-  const compared = nonCachedTokens(comparedUsage);
-  return ratioOrNull(baseline - compared, baseline);
+  return deltaRatioOrNull(nonCachedTokens(baselineUsage), nonCachedTokens(comparedUsage));
 }
 
 function nonCachedDeltaRatio(baseUsage, improvedUsage) {
-  const base = nonCachedTokens(baseUsage);
-  const improved = nonCachedTokens(improvedUsage);
-  return ratioOrNull(base - improved, base);
+  return deltaRatioOrNull(nonCachedTokens(baseUsage), nonCachedTokens(improvedUsage));
+}
+
+function deltaRatioOrNull(base, compared) {
+  if (!Number.isFinite(base) || !Number.isFinite(compared)) {
+    return null;
+  }
+  return ratioOrNull(base - compared, base);
+}
+
+function hasUsage(usage) {
+  return Boolean(usage)
+    && Number.isFinite(Number(usage.input_tokens))
+    && Number.isFinite(Number(usage.output_tokens));
 }
 
 function summarizeUsage(usage) {

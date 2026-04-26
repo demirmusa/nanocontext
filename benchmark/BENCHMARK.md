@@ -129,6 +129,12 @@ claude --version
 Project: ______    Task: ______    Condition: [ ] Baseline  [ ] NanoContext
 ```
 
+### Agent constraint
+
+For every benchmark condition, prepend this instruction to the task prompt:
+
+> Do not run tests, builds, package managers, linters, formatters, dev servers, database commands, or any other command that executes project code. You may inspect files, search the repository, and edit source files needed for the task. In your final answer, describe the validation you would run, but do not run it.
+
 #### Baseline Run (No NanoContext)
 
 1. Open a **new** Claude Code session in the project directory:

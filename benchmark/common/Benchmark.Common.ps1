@@ -126,6 +126,24 @@ function Resolve-BenchmarkCodexRunModel {
     return Get-BenchmarkEnvValue -Name 'CODEX_RUN_MODEL' -DefaultValue $null
 }
 
+function Get-BenchmarkAgentInstruction {
+    return @"
+Benchmark constraint:
+- Do not run tests, builds, package managers, linters, formatters, dev servers, database commands, or any other command that executes project code.
+- You may inspect files, search the repository, and edit source files needed for the task.
+- In your final answer, describe the validation you would run, but do not run it.
+"@
+}
+
+function Get-BenchmarkExecutionPrompt {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TaskPrompt
+    )
+
+    return "$(Get-BenchmarkAgentInstruction)`n`nTask:`n$TaskPrompt"
+}
+
 function Test-BenchmarkAgentSetup {
     param(
         [Parameter(Mandatory = $true)]
@@ -260,7 +278,11 @@ function Invoke-LoggedProcess {
         [string]$StderrPrefix,
         [string]$StdoutColor = "Gray",
         [string]$StderrColor = "DarkYellow",
-        [string]$InputPath
+        [string]$InputPath,
+        [switch]$NoFinalReplay,
+        [int]$GraceSecondsAfterTurnCompleted = 0,
+        [int]$MaxIdleSeconds = 0,
+        [string[]]$ProcessNamesToStopAfterCapturedTurn = @()
     )
 
     if (Test-Path $StdoutPath) {
@@ -280,6 +302,7 @@ function Invoke-LoggedProcess {
         "& `"$FilePath`" $argumentText $redirectClause"
     }
 
+    $processStartCutoff = (Get-Date).AddSeconds(-2)
     $job = Start-Job -ScriptBlock {
         param($Directory, $CommandText)
         Set-Location $Directory
@@ -289,6 +312,10 @@ function Invoke-LoggedProcess {
 
     $stdoutOffset = 0
     $stderrOffset = 0
+    $turnCompletedAt = $null
+    $completedFromCapturedTurn = $false
+    $timedOutAfterIdle = $false
+    $lastOutputAt = Get-Date
 
     while ($job.State -eq 'Running') {
         if (Test-Path $StdoutPath) {
@@ -296,6 +323,10 @@ function Invoke-LoggedProcess {
             while ($stdoutOffset -lt $stdoutLines.Count) {
                 $line = $stdoutLines[$stdoutOffset]
                 $stdoutOffset++
+                $lastOutputAt = Get-Date
+                if (($GraceSecondsAfterTurnCompleted -gt 0) -and ($line -like '*"type":"turn.completed"*')) {
+                    $turnCompletedAt = Get-Date
+                }
                 if (-not [string]::IsNullOrWhiteSpace($line)) {
                     Write-Host "[$StdoutPrefix] $line" -ForegroundColor $StdoutColor
                 }
@@ -307,20 +338,71 @@ function Invoke-LoggedProcess {
             while ($stderrOffset -lt $stderrLines.Count) {
                 $line = $stderrLines[$stderrOffset]
                 $stderrOffset++
+                $lastOutputAt = Get-Date
                 if (-not [string]::IsNullOrWhiteSpace($line)) {
                     Write-Host "[$StderrPrefix] $line" -ForegroundColor $StderrColor
                 }
             }
         }
 
+        if (($GraceSecondsAfterTurnCompleted -gt 0) -and ($null -ne $turnCompletedAt)) {
+            $elapsedAfterTurnCompleted = ((Get-Date) - $turnCompletedAt).TotalSeconds
+            if ($elapsedAfterTurnCompleted -ge $GraceSecondsAfterTurnCompleted) {
+                Write-Host "[$StdoutPrefix] process still running $([int]$elapsedAfterTurnCompleted)s after turn.completed; continuing with captured output" -ForegroundColor DarkYellow
+                $completedFromCapturedTurn = $true
+                foreach ($processName in $ProcessNamesToStopAfterCapturedTurn) {
+                    Get-Process -Name $processName -ErrorAction SilentlyContinue |
+                        Where-Object {
+                            try {
+                                $_.StartTime -ge $processStartCutoff
+                            } catch {
+                                $false
+                            }
+                        } |
+                        Stop-Process -Force -ErrorAction SilentlyContinue
+                }
+                Stop-Job -Job $job -ErrorAction SilentlyContinue | Out-Null
+                break
+            }
+        }
+
+        if (($MaxIdleSeconds -gt 0) -and ($null -eq $turnCompletedAt)) {
+            $idleSeconds = ((Get-Date) - $lastOutputAt).TotalSeconds
+            if ($idleSeconds -ge $MaxIdleSeconds) {
+                Write-Host "[$StdoutPrefix] no output for $([int]$idleSeconds)s; stopping stalled process and continuing" -ForegroundColor DarkYellow
+                $timedOutAfterIdle = $true
+                foreach ($processName in $ProcessNamesToStopAfterCapturedTurn) {
+                    Get-Process -Name $processName -ErrorAction SilentlyContinue |
+                        Where-Object {
+                            try {
+                                $_.StartTime -ge $processStartCutoff
+                            } catch {
+                                $false
+                            }
+                        } |
+                        Stop-Process -Force -ErrorAction SilentlyContinue
+                }
+                Stop-Job -Job $job -ErrorAction SilentlyContinue | Out-Null
+                break
+            }
+        }
+
         Start-Sleep -Milliseconds 200
     }
 
-    $exitCode = Receive-Job -Job $job
-    Remove-Job -Job $job -Force | Out-Null
+    $exitCode = if ($completedFromCapturedTurn) {
+        0
+    } elseif ($timedOutAfterIdle) {
+        124
+    } else {
+        Receive-Job -Job $job
+    }
+    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue | Out-Null
 
-    Write-LogFileToConsole -Path $StdoutPath -Prefix $StdoutPrefix -Color $StdoutColor
-    Write-LogFileToConsole -Path $StderrPath -Prefix $StderrPrefix -Color $StderrColor
+    if (-not $NoFinalReplay) {
+        Write-LogFileToConsole -Path $StdoutPath -Prefix $StdoutPrefix -Color $StdoutColor
+        Write-LogFileToConsole -Path $StderrPath -Prefix $StderrPrefix -Color $StderrColor
+    }
 
     return [int]$exitCode
 }
@@ -859,7 +941,8 @@ function Invoke-CodexBenchmark {
     $stdoutPath = Join-Path $ConditionContext.LogsPath "codex-stdout.log"
     $commandPath = Join-Path $ConditionContext.ConditionRoot "command.json"
 
-    Set-Content -Path $promptPath -Value $TaskDefinition.Prompt -Encoding UTF8
+    $executionPrompt = Get-BenchmarkExecutionPrompt -TaskPrompt $TaskDefinition.Prompt
+    Set-Content -Path $promptPath -Value $executionPrompt -Encoding UTF8
 
     $execSettings = Resolve-BenchmarkCodexExecSettings
     $arguments = @()
@@ -917,14 +1000,17 @@ function Invoke-CodexBenchmark {
             -StderrPrefix "$($ConditionContext.Condition.ToUpperInvariant())-AI-STDERR" `
             -StdoutColor "DarkGray" `
             -StderrColor "DarkYellow" `
-            -InputPath $promptPath
+            -InputPath $promptPath `
+            -NoFinalReplay `
+            -GraceSecondsAfterTurnCompleted 30 `
+            -MaxIdleSeconds 300 `
+            -ProcessNamesToStopAfterCapturedTurn @("codex")
         Set-Content -Path $stdoutPath -Value (Get-Content -LiteralPath $promptPath -Raw) -Encoding UTF8
     } finally {
         Pop-Location
     }
 
-    Write-LogFileToConsole -Path $stdoutPath -Prefix "$($ConditionContext.Condition.ToUpperInvariant())-PROMPT" -Color DarkGray
-    Write-CodexEventsToConsole -EventsPath $agentEventsPath -Condition $ConditionContext.Condition
+    Write-Host "[$($ConditionContext.Condition.ToUpperInvariant())-PROMPT] $promptPath" -ForegroundColor DarkGray
 
     $completedAt = Get-Date
 
@@ -1111,6 +1197,9 @@ function Get-BenchmarkComparisonSummary {
     $baselineTotalTokens = Get-TotalTokens -Usage $BaselineSummary.usage
     $nanocontextTotalTokens = Get-TotalTokens -Usage $NanoContextSummary.usage
     $smartsearchTotalTokens = Get-TotalTokens -Usage $NanoContextSmartSearchSummary.usage
+    $nanocontextVsBaselineTotalTokenDelta = Get-NullableDelta -Left $nanocontextTotalTokens -Right $baselineTotalTokens
+    $smartsearchVsBaselineTotalTokenDelta = Get-NullableDelta -Left $smartsearchTotalTokens -Right $baselineTotalTokens
+    $smartsearchVsNanocontextTotalTokenDelta = Get-NullableDelta -Left $smartsearchTotalTokens -Right $nanocontextTotalTokens
 
     return @{
         benchmarkId = $TaskDefinition.Id
@@ -1152,14 +1241,14 @@ function Get-BenchmarkComparisonSummary {
             finalAnswer = $NanoContextSmartSearchSummary.finalAnswer
         }
         comparison = @{
-            nanocontextVsBaselineTotalTokenDelta = $nanocontextTotalTokens - $baselineTotalTokens
-            nanocontextVsBaselineTotalTokenSavings = $baselineTotalTokens - $nanocontextTotalTokens
+            nanocontextVsBaselineTotalTokenDelta = $nanocontextVsBaselineTotalTokenDelta
+            nanocontextVsBaselineTotalTokenSavings = Get-NullableDelta -Left $baselineTotalTokens -Right $nanocontextTotalTokens
             nanocontextVsBaselineDurationDeltaMs = $NanoContextSummary.durationMs - $BaselineSummary.durationMs
-            smartsearchVsBaselineTotalTokenDelta = $smartsearchTotalTokens - $baselineTotalTokens
-            smartsearchVsBaselineTotalTokenSavings = $baselineTotalTokens - $smartsearchTotalTokens
+            smartsearchVsBaselineTotalTokenDelta = $smartsearchVsBaselineTotalTokenDelta
+            smartsearchVsBaselineTotalTokenSavings = Get-NullableDelta -Left $baselineTotalTokens -Right $smartsearchTotalTokens
             smartsearchVsBaselineDurationDeltaMs = $NanoContextSmartSearchSummary.durationMs - $BaselineSummary.durationMs
-            smartsearchVsNanocontextTotalTokenDelta = $smartsearchTotalTokens - $nanocontextTotalTokens
-            smartsearchVsNanocontextTotalTokenSavings = $nanocontextTotalTokens - $smartsearchTotalTokens
+            smartsearchVsNanocontextTotalTokenDelta = $smartsearchVsNanocontextTotalTokenDelta
+            smartsearchVsNanocontextTotalTokenSavings = Get-NullableDelta -Left $nanocontextTotalTokens -Right $smartsearchTotalTokens
             smartsearchVsNanocontextDurationDeltaMs = $NanoContextSmartSearchSummary.durationMs - $NanoContextSummary.durationMs
             baselineCommandCount = @($BaselineSummary.commands).Count
             nanocontextCommandCount = @($NanoContextSummary.commands).Count
@@ -1179,6 +1268,19 @@ function Get-BenchmarkComparisonSummary {
             }
         }
     }
+}
+
+function Get-NullableDelta {
+    param(
+        $Left,
+        $Right
+    )
+
+    if (($null -eq $Left) -or ($null -eq $Right)) {
+        return $null
+    }
+
+    return $Left - $Right
 }
 
 function Normalize-BenchmarkCommandText {
@@ -1228,7 +1330,7 @@ function Get-TotalTokens {
         $Usage
     )
 
-    if ($null -eq $Usage) {
+    if (($null -eq $Usage) -or ($null -eq $Usage.input_tokens) -or ($null -eq $Usage.output_tokens)) {
         return $null
     }
 

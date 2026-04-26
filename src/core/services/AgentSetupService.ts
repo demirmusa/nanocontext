@@ -39,7 +39,7 @@ const AGENT_DEFINITIONS: AgentDefinition[] = [
     id: 'claude',
     name: 'Claude Code',
     mcpConfigPath: '.mcp.json',
-    agentMdFiles: ['CLAUDE.md', 'claude.md'],
+    agentMdFiles: ['CLAUDE.md', '.claude/CLAUDE.md', 'claude.md'],
     mcpConfigKind: 'json',
     rootKey: 'mcpServers',
   },
@@ -140,6 +140,8 @@ This project uses **NanoContext**, a code intelligence MCP server that provides 
 - When using NanoContext tools, do NOT add commentary or explanations about the tool calls. Execute them silently and use the results directly.
 - All file paths (f param) MUST be relative to project root. Never use absolute paths.
 - At the beginning of a session, call \`watch\` once so changed files are auto-indexed in the background.
+- Do not use shell file readers such as \`sed\`, \`cat\`, \`grep\`, \`rg\`, or \`Get-Content\` for initial code discovery. Use NanoContext \`search\`, \`symbol\`, \`files\`, \`code\`, \`refs\`, \`callers\`, \`callees\`, \`trace\`, and \`impact\` first.
+- Use raw file reads only after NanoContext has identified a precise file or line range and only when the NanoContext \`code\` tool or header resources are insufficient.
 
 ### Tools
 
@@ -214,6 +216,8 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 - Prefer tool-native batching such as repeated \`--query\` flags instead of shell composition like \`cmd1 && cmd2\` or \`cmd1 | cmd2\`.
 - At the beginning of a session, run \`nc agent-start\` once so changed files are auto-indexed in the background and saved memories are loaded. Do not repeatedly call \`nc memories\`.
 - All file paths MUST be relative to project root. Never use absolute paths.
+- Do not use shell file readers such as \`sed\`, \`cat\`, \`grep\`, \`rg\`, or \`Get-Content\` for initial code discovery. Start with \`nc search\`, \`nc symbol\`, \`nc files\`, \`nc get\`, \`nc open\`, \`nc refs\`, \`nc callers\`, \`nc callees\`, \`nc trace\`, or \`nc impact\`.
+- Use raw shell file reads only after NanoContext has narrowed the target and \`nc get <file>[start-end]\` or \`nc open <file>[start-end]\` is not enough.
 
 ### Memory
 

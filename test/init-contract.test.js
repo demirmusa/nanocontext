@@ -23,6 +23,8 @@ test('generated init instructions mirror the MCP tool catalog', () => {
   }
 
   assert.match(instructions, /nc:\/\/headers\/\{file_path\}/);
+  assert.match(instructions, /Do not use shell file readers/);
+  assert.match(instructions, /sed/);
 });
 
 test('generated CLI init instructions mention new lookup and symbol-memory flows', () => {
@@ -38,6 +40,7 @@ test('generated CLI init instructions mention new lookup and symbol-memory flows
   assert.match(instructions, /nc stale/);
   assert.match(instructions, /nc ignore <path>/);
   assert.match(instructions, /Do not repeatedly call `nc memories`/);
+  assert.match(instructions, /Do not use shell file readers/);
   assert.doesNotMatch(instructions, /nc scan/);
 });
 
@@ -93,6 +96,32 @@ test('nc init supports non-interactive setup flags for benchmark automation', ()
   assert.match(codexConfig, /mcp-server/);
   assert.match(ignoreFile, /\*\*\/\*\.min\.js/);
   assert.match(ignoreFile, /\*\*\/\*\.bundle\.js/);
+});
+
+test('nc init writes Claude instructions to root and .claude project memory files', () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocontext-claude-init-'));
+  fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, 'src', 'app.ts'), 'export function app() {}', 'utf-8');
+
+  const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
+  execFileSync(process.execPath, [
+    cliPath,
+    'init',
+    '--llm-provider', 'none',
+    '--embedding-provider', 'none',
+    '--include', 'src/**/*.ts',
+    '--mode', 'mcp',
+    '--agents', 'claude',
+    '--yes',
+  ], { cwd: projectRoot, encoding: 'utf-8' });
+
+  const rootClaude = fs.readFileSync(path.join(projectRoot, 'CLAUDE.md'), 'utf-8');
+  const dotClaude = fs.readFileSync(path.join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
+  const mcpConfig = fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf-8');
+
+  assert.match(rootClaude, /## NanoContext MCP/);
+  assert.match(dotClaude, /## NanoContext MCP/);
+  assert.match(mcpConfig, /nanocontext/);
 });
 
 test('nc init in cli mode does not leave codex MCP config behind', () => {

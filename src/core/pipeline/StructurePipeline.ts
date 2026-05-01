@@ -165,7 +165,7 @@ export class StructurePipeline implements IStructurePipeline {
 
     onProgress?.(progress);
 
-    const changedFiles: string[] = [];
+    const vectorCandidateFiles = new Set<string>();
 
     for (const file of files) {
       progress.currentFile = file;
@@ -201,7 +201,7 @@ export class StructurePipeline implements IStructurePipeline {
         manifest.changedFiles++;
         manifest.indexedFiles++;
         manifest.files.push({ file, status: 'changed', methods: header.methods.length });
-        changedFiles.push(file);
+        vectorCandidateFiles.add(file);
       } catch (err) {
         progress.skipped = false;
         manifest.failedFiles++;
@@ -273,6 +273,9 @@ export class StructurePipeline implements IStructurePipeline {
                   try {
                     progress.insightResult = await this.generateInsightsForFile(task.file, task.header, task.content, true)
                       ?? { file: task.file, sentCount: task.sentCount, methods: [] };
+                    if (progress.insightResult.methods.length > 0 && !progress.insightResult.error) {
+                      vectorCandidateFiles.add(task.file);
+                    }
                   } catch (err) {
                     this.logger.error(`Insight failed for ${task.file}:`, err);
                     progress.insightResult = {
@@ -307,51 +310,53 @@ export class StructurePipeline implements IStructurePipeline {
 
     // ── Phase 3: Vector embeddings ──────────────────────────────────
     if (this.embeddingProvider) {
-      // Check ALL files for missing vectors, not just changedFiles
-      const vectorFiles = changedFiles.length > 0 ? changedFiles : files;
+      const vectorCount = await this.vectorStore.count();
+      const vectorFiles = vectorCount === 0 ? files : [...vectorCandidateFiles];
 
-      progress.phase = 'vectors';
-      progress.processedFiles = 0;
-      progress.totalFiles = vectorFiles.length;
-      onProgress?.(progress);
+      if (vectorFiles.length > 0) {
+        progress.phase = 'vectors';
+        progress.processedFiles = 0;
+        progress.totalFiles = vectorFiles.length;
+        progress.currentFile = undefined;
+        onProgress?.(progress);
 
-      const concurrency = config.aiInsightConcurrency || 20;
-      let running = 0;
-      let nextIdx = 0;
+        const concurrency = config.aiInsightConcurrency || 20;
+        let running = 0;
+        let nextIdx = 0;
 
-      await new Promise<void>((resolveAll) => {
-        if (vectorFiles.length === 0) { resolveAll(); return; }
-        const startNext = (): void => {
-          while (running < concurrency && nextIdx < vectorFiles.length) {
-            const file = vectorFiles[nextIdx++];
-            running++;
+        await new Promise<void>((resolveAll) => {
+          const startNext = (): void => {
+            while (running < concurrency && nextIdx < vectorFiles.length) {
+              const file = vectorFiles[nextIdx++];
+              running++;
 
-            (async () => {
-              try {
-                const header = await this.headerStore.read(file);
-                if (header) {
-                  await this.syncVectorsForFile({ ...header, generationId: header.generationId ?? manifest.generationId });
+              (async () => {
+                try {
+                  const header = await this.headerStore.read(file);
+                  if (header) {
+                    await this.syncVectorsForFile({ ...header, generationId: header.generationId ?? manifest.generationId });
+                  }
+                } catch (err) {
+                  this.logger.error(`Vector phase failed for ${file}:`, err);
                 }
-              } catch (err) {
-                this.logger.error(`Vector phase failed for ${file}:`, err);
-              }
 
-              running--;
-              progress.processedFiles++;
-              progress.currentFile = file;
-              onProgress?.(progress);
-              progress.currentFile = undefined;
+                running--;
+                progress.processedFiles++;
+                progress.currentFile = file;
+                onProgress?.(progress);
+                progress.currentFile = undefined;
 
-              if (running === 0 && nextIdx >= vectorFiles.length) {
-                resolveAll();
-              } else {
-                startNext();
-              }
-            })();
-          }
-        };
-        startNext();
-      });
+                if (running === 0 && nextIdx >= vectorFiles.length) {
+                  resolveAll();
+                } else {
+                  startNext();
+                }
+              })();
+            }
+          };
+          startNext();
+        });
+      }
     }
 
     manifest.finishedAt = new Date().toISOString();

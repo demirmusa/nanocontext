@@ -28,6 +28,7 @@ import { ignoreCommand } from './commands/ignore';
 import { removeCommand } from './commands/remove';
 import { agentStartCommand } from './commands/agent-start';
 import { resumeCommand, stopCommand } from './commands/embedding-control';
+import { codexLoginCommand, codexStatusCommand, codexLogoutCommand } from './commands/codex';
 
 const program = new Command();
 
@@ -250,6 +251,25 @@ program
   .description('Delete a memory')
   .option('--before <date>', 'Delete memories before date')
   .action(forgetCommand);
+
+const codexCmd = program
+  .command('codex')
+  .description('Manage Codex OAuth authentication');
+
+codexCmd
+  .command('login')
+  .description('Authenticate with OpenAI via browser (ChatGPT Plus)')
+  .action(codexLoginCommand);
+
+codexCmd
+  .command('status')
+  .description('Show Codex authentication status')
+  .action(codexStatusCommand);
+
+codexCmd
+  .command('logout')
+  .description('Remove stored Codex credentials')
+  .action(codexLogoutCommand);
 
 program
   .command('status')

@@ -1,5 +1,6 @@
 import { checkbox, confirm, input, select } from '@inquirer/prompts';
 import { colors } from '../../utils/colors';
+import { CodexAuthStore } from '../../../core/llm/auth/CodexAuthStore';
 import { Container } from '../../../core/Container';
 import { AgentDefinition } from '../../../core/services/AgentSetupService';
 import { EmbeddingConfig, LLMConfig } from '../../../core/interfaces/types';
@@ -163,7 +164,7 @@ async function promptProviderConfig(detection: ProjectDetectionSummary): Promise
       { name: 'Ollama (local)', value: 'ollama' },
       { name: 'OpenAI', value: 'openai' },
       { name: 'Anthropic', value: 'anthropic' },
-      { name: 'Codex CLI (local, requires `codex` in PATH)', value: 'codex-cli' },
+      { name: 'Codex OAuth (ChatGPT Plus)', value: 'codex-oauth' },
       { name: 'None (structure only)', value: 'none' },
     ],
   });
@@ -185,9 +186,27 @@ async function promptProviderConfig(detection: ProjectDetectionSummary): Promise
     const model = await input({ message: 'Ollama model:', default: 'llama3.2' });
     llmConfig = { provider: 'ollama', endpoint, model };
     embeddingConfig = await promptEmbeddingConfig(llmConfig);
-  } else if (llmProvider === 'codex-cli') {
-    const codexModel = await input({ message: 'Codex model:', default: 'gpt-5.4-mini' });
-    llmConfig = { provider: 'codex-cli', model: codexModel };
+  } else if (llmProvider === 'codex-oauth') {
+    console.log(colors.yellow('⚠ Code snippets will be sent to OpenAI servers (ChatGPT Plus subscription).'));
+    const authStore = new CodexAuthStore();
+    const status = authStore.getStatus();
+    if (status.authenticated && !status.expired) {
+      console.log(colors.green(`  Already authenticated. Account: ${status.accountId}`));
+    } else {
+      console.log('  Opening browser to authenticate with OpenAI...');
+      console.log(colors.dim('  If the browser does not open, copy the URL from the terminal and open it manually.\n'));
+      await authStore.login((url) => {
+        console.log(colors.cyan(`  ${url}\n`));
+        const { exec } = require('child_process') as typeof import('child_process');
+        const platform = process.platform;
+        const cmd = platform === 'win32' ? `start "" "${url}"` : platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
+        exec(cmd);
+      });
+      const newStatus = authStore.getStatus();
+      console.log(colors.green(`  Authenticated! Account: ${newStatus.accountId}`));
+    }
+    const model = await input({ message: 'Model:', default: 'gpt-5.4-mini' });
+    llmConfig = { provider: 'codex-oauth', model };
     embeddingConfig = await promptEmbeddingConfig(llmConfig);
   } else {
     console.log(colors.yellow(`⚠ Cloud LLM selected. Code snippets will be sent to ${llmProvider} servers.`));
@@ -220,7 +239,7 @@ async function promptProviderConfig(detection: ProjectDetectionSummary): Promise
     embedding: embeddingConfig,
     aiInsight,
     smartSearchEnabled,
-    aiInsightConcurrency: llmProvider === 'codex-cli' ? 2 : undefined,
+    aiInsightConcurrency: undefined,
     includePatterns: includeInput.split(',').map(value => value.trim()).filter(Boolean),
   };
 }
@@ -290,7 +309,7 @@ async function resolveProviderConfigFromOptions(
     embedding: embeddingConfig,
     aiInsight,
     smartSearchEnabled: Boolean(options.smartSearch && llmProvider !== 'none'),
-    aiInsightConcurrency: llmProvider === 'codex-cli' ? 2 : undefined,
+    aiInsightConcurrency: undefined,
     includePatterns: resolveIncludePatterns(detection, options.include),
   };
 }

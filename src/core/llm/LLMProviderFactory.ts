@@ -3,7 +3,7 @@ import { LLMConfig } from '../interfaces/types';
 import { OllamaLLMProvider } from './providers/OllamaLLMProvider';
 import { OpenAILLMProvider } from './providers/OpenAILLMProvider';
 import { AnthropicLLMProvider } from './providers/AnthropicLLMProvider';
-import { CodexCliLLMProvider } from './providers/CodexCliLLMProvider';
+import { CodexOAuthLLMProvider } from './providers/CodexOAuthLLMProvider';
 
 export class LLMProviderFactory implements ILLMProviderFactory {
   private providerMap = new Map<string, new (config: LLMConfig) => ILLMProvider>();
@@ -12,7 +12,7 @@ export class LLMProviderFactory implements ILLMProviderFactory {
     this.providerMap.set('ollama', OllamaLLMProvider);
     this.providerMap.set('openai', OpenAILLMProvider);
     this.providerMap.set('anthropic', AnthropicLLMProvider);
-    this.providerMap.set('codex-cli', CodexCliLLMProvider as new (config: LLMConfig) => ILLMProvider);
+    this.providerMap.set('codex-oauth', CodexOAuthLLMProvider);
   }
 
   create(config: LLMConfig): ILLMProvider {

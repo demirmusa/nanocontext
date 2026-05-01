@@ -96,6 +96,8 @@ test('nc init supports non-interactive setup flags for benchmark automation', ()
   assert.match(codexConfig, /mcp-server/);
   assert.match(ignoreFile, /\*\*\/\*\.min\.js/);
   assert.match(ignoreFile, /\*\*\/\*\.bundle\.js/);
+  assert.match(ignoreFile, /\*\*\/log\/\*\*/);
+  assert.match(ignoreFile, /\*\*\/logs\/\*\*/);
 });
 
 test('nc init writes Claude instructions to root and .claude project memory files', () => {

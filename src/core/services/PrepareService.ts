@@ -83,36 +83,46 @@ export class PrepareService {
 export function formatPrepareReport(report: PrepareReport): string {
   const lines: string[] = [`prepare: ${report.task}`, `intent: ${report.intent}`];
   if (report.warnings.length > 0) {
-    lines.push(`warnings: ${report.warnings.join(' | ')}`);
+    lines.push(`warnings: ${report.warnings.slice(0, 2).join(' | ')}`);
   }
 
-  lines.push('');
-  lines.push('top:');
-  for (const result of report.topResults.slice(0, 5)) {
+  const top = report.topResults.slice(0, 3);
+  if (top.length > 0) {
+    lines.push('');
+    lines.push('focus:');
+  }
+  for (const result of top) {
     const label = result.type === 'memory'
       ? `memory ${result.text ?? result.id ?? ''}`.trim()
-      : `${result.file ?? 'unknown'} ${result.method ?? result.class ?? ''}${result.loc ? `[${result.loc}]` : ''}`.trim();
-    lines.push(`- ${label} score=${result.score ?? 'n/a'}${result.matchReason ? ` reason="${result.matchReason}"` : ''}`);
+      : `${result.file ?? 'unknown'}${result.loc ? `[${result.loc}]` : ''}${result.class || result.method ? ` ${formatResultSymbol(result)}` : ''}`.trim();
+    lines.push(`- ${label}`);
   }
 
-  if (report.relatedFiles.length > 0) {
+  const extraFiles = report.relatedFiles
+    .filter(file => !top.some(result => result.file === file))
+    .slice(0, 3);
+  if (extraFiles.length > 0) {
     lines.push('');
     lines.push('files:');
-    for (const file of report.relatedFiles) lines.push(`- ${file}`);
+    for (const file of extraFiles) lines.push(`- ${file}`);
   }
 
-  if (report.symbolCandidates.length > 0) {
+  const topSymbols = new Set(top.map(formatResultSymbol).filter(Boolean));
+  const extraSymbols = report.symbolCandidates
+    .filter(symbol => !topSymbols.has(symbol))
+    .slice(0, 3);
+  if (extraSymbols.length > 0) {
     lines.push('');
     lines.push('symbols:');
-    for (const symbol of report.symbolCandidates) lines.push(`- ${symbol}`);
+    for (const symbol of extraSymbols) lines.push(`- ${symbol}`);
   }
 
   if (report.impact) {
     lines.push('');
     lines.push('impact:');
-    if (report.impact.callers.length > 0) lines.push(`- callers: ${report.impact.callers.map(item => item.symbol).join(', ')}`);
-    if (report.impact.callees.length > 0) lines.push(`- callees: ${report.impact.callees.map(item => item.symbol).join(', ')}`);
-    if (report.impact.possibleTests.length > 0) lines.push(`- tests: ${report.impact.possibleTests.map(item => item.file).join(', ')}`);
+    if (report.impact.callers.length > 0) lines.push(`- callers: ${report.impact.callers.slice(0, 3).map(item => item.symbol).join(', ')}`);
+    if (report.impact.callees.length > 0) lines.push(`- callees: ${report.impact.callees.slice(0, 3).map(item => item.symbol).join(', ')}`);
+    if (report.impact.possibleTests.length > 0) lines.push(`- tests: ${report.impact.possibleTests.slice(0, 3).map(item => item.file).join(', ')}`);
   }
 
   if (report.memories.length > 0) {
@@ -123,7 +133,7 @@ export function formatPrepareReport(report: PrepareReport): string {
 
   lines.push('');
   lines.push('next:');
-  for (const command of report.suggestedNext) lines.push(`- ${command}`);
+  for (const command of compactNextCommands(report.suggestedNext).slice(0, 4)) lines.push(`- ${command}`);
 
   return lines.join('\n');
 }
@@ -145,13 +155,39 @@ function buildSuggestedNext(
 ): string[] {
   return unique([
     ...results.map(result => result.suggestedNext).filter(Boolean) as string[],
-    ...files.slice(0, 2).map(file => `nc get ${file}`),
-    ...symbols.slice(0, 2).map(symbol => `nc impact ${symbol}`),
+    ...files.slice(0, 1).map(file => `nc get ${file}`),
+    ...symbols.slice(0, 1).map(symbol => `nc impact ${symbol}`),
     ...(impact?.suggestedNext ?? []),
-    `nc search -v "${task}"`,
+    `nc search "${task}"`,
   ]).slice(0, 6);
 }
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function formatResultSymbol(result: SearchResult): string {
+  if (result.type === 'method') {
+    return result.class && result.method ? `${result.class}#${result.method}` : result.method ?? '';
+  }
+  return result.class ?? '';
+}
+
+function compactNextCommands(commands: string[]): string[] {
+  const seenKinds = new Set<string>();
+  const result: string[] = [];
+
+  for (const command of commands) {
+    const kind = command.startsWith('nc get ') ? 'get'
+      : command.startsWith('nc impact ') ? 'impact'
+        : command.startsWith('nc callers ') ? 'callers'
+          : command.startsWith('nc callees ') ? 'callees'
+            : command.startsWith('nc search ') ? 'search'
+              : command;
+    if (seenKinds.has(kind)) continue;
+    seenKinds.add(kind);
+    result.push(command);
+  }
+
+  return result;
 }

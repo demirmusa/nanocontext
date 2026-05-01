@@ -673,6 +673,8 @@ test('prepare service builds compact task context with warnings memories and nex
   assert.match(output, /test\/auth.test.ts/);
   assert.match(output, /Refresh token note/);
   assert.match(output, /nc get src\/auth.ts/);
+  assert.doesNotMatch(output, /score=/);
+  assert.doesNotMatch(output, /reason="/);
 });
 
 test('search service emits search telemetry through debug logging instead of info', async () => {

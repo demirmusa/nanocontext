@@ -45,6 +45,7 @@ export interface SymbolIndexMetadata {
   namespace?: string;
   imports?: string[];
   exports?: string[];
+  refs?: string[];
   decorators?: string[];
   visibility?: string;
   isAsync?: boolean;

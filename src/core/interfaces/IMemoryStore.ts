@@ -8,5 +8,6 @@ export interface IMemoryStore {
   remove(id: string): Promise<boolean>;
   removeBefore(date: string): Promise<number>;
   findSimilar(text: string, threshold?: number, limit?: number): Promise<MemoryRecord[]>;
+  searchLexical?(query: string, limit?: number): MemoryRecord[];
   close(): void;
 }

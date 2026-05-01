@@ -33,8 +33,17 @@ export class MemoryStore implements IMemoryStore {
         scope TEXT DEFAULT 'project',
         created_at TEXT DEFAULT (datetime('now'))
       );
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+        id UNINDEXED,
+        text,
+        ref,
+        file,
+        symbol
+      );
     `);
     this.migrateSchema();
+    this.migrateMemoryFts();
   }
 
   async add(
@@ -51,6 +60,9 @@ export class MemoryStore implements IMemoryStore {
     this.db.prepare(
       'INSERT INTO memories (id, text, ref, file, symbol, symbol_id, scope, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(id, text, ref || null, file || null, symbol || null, symbolId || null, scope, createdAt);
+    this.db.prepare(
+      'INSERT INTO memories_fts (id, text, ref, file, symbol) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, text, ref || null, file || null, symbol || null);
 
     // Add to vector store if available
     if (this.vectorStore && this.embeddingProvider) {
@@ -120,6 +132,7 @@ export class MemoryStore implements IMemoryStore {
 
   async remove(id: string): Promise<boolean> {
     const result = this.db.prepare('DELETE FROM memories WHERE id = ?').run(id);
+    this.db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
     if (this.vectorStore) {
       await this.vectorStore.remove([`memory::${id}`]);
     }
@@ -132,6 +145,10 @@ export class MemoryStore implements IMemoryStore {
     ).all(date) as Array<{ id: string }>;
 
     const result = this.db.prepare('DELETE FROM memories WHERE created_at < ?').run(date);
+    if (rows.length > 0) {
+      const placeholders = rows.map(() => '?').join(', ');
+      this.db.prepare(`DELETE FROM memories_fts WHERE id IN (${placeholders})`).run(...rows.map(r => r.id));
+    }
 
     if (this.vectorStore && rows.length > 0) {
       await this.vectorStore.remove(rows.map(r => `memory::${r.id}`));
@@ -140,11 +157,29 @@ export class MemoryStore implements IMemoryStore {
     return result.changes;
   }
 
+  searchLexical(query: string, limit: number = 10): MemoryRecord[] {
+    const ftsQuery = buildMemoryFtsQuery(query);
+    if (!ftsQuery) return [];
+    try {
+      const rows = this.db.prepare(
+        `SELECT m.id, m.text, m.ref, m.file, m.symbol, m.symbol_id, m.scope, m.created_at
+         FROM memories_fts
+         JOIN memories m ON m.id = memories_fts.id
+         WHERE memories_fts MATCH ?
+         ORDER BY bm25(memories_fts) ASC
+         LIMIT ?`
+      ).all(ftsQuery, limit) as MemoryRow[];
+      return rows.map(mapMemoryRow);
+    } catch {
+      return [];
+    }
+  }
+
   async findSimilar(text: string, threshold?: number, limit: number = 5): Promise<MemoryRecord[]> {
-    // If no embedding, fall back to text search
+    // If no embedding, fall back to lexical search
     if (!this.embeddingProvider || !this.vectorStore) {
-      const fallback = await this.list(text.split(' ')[0]);
-      return fallback.slice(0, limit);
+      const fallback = this.searchLexical(text, limit);
+      return fallback.length > 0 ? fallback : (await this.list(text.split(' ')[0])).slice(0, limit);
     }
 
     try {
@@ -173,6 +208,18 @@ export class MemoryStore implements IMemoryStore {
     this.db.close();
   }
 
+  private migrateMemoryFts(): void {
+    const ftsCount = this.db.prepare('SELECT COUNT(*) as count FROM memories_fts').get() as { count: number };
+    const memCount = this.db.prepare('SELECT COUNT(*) as count FROM memories').get() as { count: number };
+    if (ftsCount.count === memCount.count) return;
+
+    this.db.exec('DELETE FROM memories_fts');
+    this.db.exec(`
+      INSERT INTO memories_fts (id, text, ref, file, symbol)
+      SELECT id, text, ref, file, symbol FROM memories
+    `);
+  }
+
   private migrateSchema(): void {
     const columns = this.db.prepare("PRAGMA table_info('memories')").all() as Array<{ name: string }>;
     if (!columns.some(column => column.name === 'file')) {
@@ -199,6 +246,15 @@ interface MemoryRow {
   symbol_id: string | null;
   scope: string | null;
   created_at: string;
+}
+
+function buildMemoryFtsQuery(query: string): string {
+  const terms = query
+    .split(/[^A-Za-z0-9_./#-]+/)
+    .map(t => t.trim())
+    .filter(t => t.length > 0)
+    .slice(0, 8);
+  return terms.map(t => `"${t.replace(/"/g, '""')}"`).join(' OR ');
 }
 
 function mapMemoryRow(row: MemoryRow): MemoryRecord {

@@ -68,7 +68,8 @@ export class SqliteStateStore implements IStateStore {
         extends_name TEXT,
         implements TEXT,
         imports TEXT,
-        exports TEXT
+        exports TEXT,
+        refs TEXT
       );
 
       CREATE VIRTUAL TABLE IF NOT EXISTS search_index_fts USING fts5(
@@ -78,7 +79,8 @@ export class SqliteStateStore implements IStateStore {
         name,
         class,
         sig,
-        insight
+        insight,
+        refs
       );
 
       CREATE TABLE IF NOT EXISTS state_references (
@@ -100,6 +102,7 @@ export class SqliteStateStore implements IStateStore {
 
     this.migrateInsightQueue();
     this.migrateSearchIndexColumns();
+    this.migrateSearchFts();
     this.rebuildSearchFts();
   }
 
@@ -167,12 +170,34 @@ export class SqliteStateStore implements IStateStore {
       implements: 'TEXT',
       imports: 'TEXT',
       exports: 'TEXT',
+      refs: 'TEXT',
     };
     for (const [name, type] of Object.entries(additions)) {
       if (!existing.has(name)) {
         this.db!.exec(`ALTER TABLE search_index ADD COLUMN ${name} ${type}`);
       }
     }
+  }
+
+  private migrateSearchFts(): void {
+    const row = this.db!.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'search_index_fts'"
+    ).get() as { sql: string } | undefined;
+    if (row?.sql?.includes('refs')) return;
+
+    this.db!.exec('DROP TABLE IF EXISTS search_index_fts');
+    this.db!.exec(`
+      CREATE VIRTUAL TABLE search_index_fts USING fts5(
+        id UNINDEXED,
+        type UNINDEXED,
+        file,
+        name,
+        class,
+        sig,
+        insight,
+        refs
+      );
+    `);
   }
 
   enqueueInsight(item: InsightQueueItem): void {
@@ -227,8 +252,8 @@ export class SqliteStateStore implements IStateStore {
     this.db!.prepare(
       `INSERT OR REPLACE INTO search_index (
         id, type, file, name, class, sig, loc, insight, generation_id, namespace, decorators,
-        visibility, is_async, is_static, parameters, return_type, extends_name, implements, imports, exports
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        visibility, is_async, is_static, parameters, return_type, extends_name, implements, imports, exports, refs
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, 'method', file, name, className ?? null, sig, loc, insight ?? null, generationId ?? null,
       metadata?.namespace ?? null,
@@ -242,16 +267,17 @@ export class SqliteStateStore implements IStateStore {
       stringifyJson(metadata?.implements),
       stringifyJson(metadata?.imports),
       stringifyJson(metadata?.exports),
+      stringifyJson(metadata?.refs),
     );
-    this.indexFts(id, 'method', file, name, className, sig, insight);
+    this.indexFts(id, 'method', file, name, className, sig, insight, metadata?.refs);
   }
 
   indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined, generationId?: string, metadata?: SymbolIndexMetadata): void {
     this.db!.prepare(
       `INSERT OR REPLACE INTO search_index (
         id, type, file, name, class, sig, loc, insight, generation_id, namespace, decorators,
-        visibility, is_async, is_static, parameters, return_type, extends_name, implements, imports, exports
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        visibility, is_async, is_static, parameters, return_type, extends_name, implements, imports, exports, refs
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, 'class', file, name, name, null, loc, insight ?? null, generationId ?? null,
       metadata?.namespace ?? null,
@@ -265,8 +291,9 @@ export class SqliteStateStore implements IStateStore {
       stringifyJson(metadata?.implements),
       stringifyJson(metadata?.imports),
       stringifyJson(metadata?.exports),
+      null,
     );
-    this.indexFts(id, 'class', file, name, name, undefined, insight);
+    this.indexFts(id, 'class', file, name, name, undefined, insight, undefined);
   }
 
   getFileIndexGenerations(file: string): string[] {
@@ -352,7 +379,7 @@ export class SqliteStateStore implements IStateStore {
     try {
       const rows = this.db!.prepare(
         `SELECT ${searchIndexSelectColumns('si')},
-                bm25(search_index_fts, 1.5, 3.0, 2.0, 1.2, 1.0) AS rank
+                bm25(search_index_fts, 1.5, 3.0, 2.0, 1.2, 1.0, 0.8) AS rank
          FROM search_index_fts
          JOIN search_index si ON si.id = search_index_fts.id
          WHERE search_index_fts MATCH ?
@@ -420,11 +447,12 @@ export class SqliteStateStore implements IStateStore {
     className: string | undefined,
     sig: string | undefined,
     insight: string | undefined,
+    refs: string[] | undefined,
   ): void {
     this.db!.prepare('DELETE FROM search_index_fts WHERE id = ?').run(id);
     this.db!.prepare(
-      'INSERT INTO search_index_fts (id, type, file, name, class, sig, insight) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, type, file, name, className ?? null, sig ?? null, insight ?? null);
+      'INSERT INTO search_index_fts (id, type, file, name, class, sig, insight, refs) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, type, file, name, className ?? null, sig ?? null, insight ?? null, refs?.join(' ') ?? null);
   }
 
   private rebuildSearchFts(): void {
@@ -436,8 +464,8 @@ export class SqliteStateStore implements IStateStore {
 
     this.db!.exec('DELETE FROM search_index_fts');
     this.db!.exec(`
-      INSERT INTO search_index_fts (id, type, file, name, class, sig, insight)
-      SELECT id, type, file, name, class, sig, insight FROM search_index
+      INSERT INTO search_index_fts (id, type, file, name, class, sig, insight, refs)
+      SELECT id, type, file, name, class, sig, insight, refs FROM search_index
     `);
   }
 }
@@ -480,6 +508,7 @@ interface SearchIndexRow {
   implements: string | null;
   imports: string | null;
   exports: string | null;
+  refs: string | null;
 }
 
 interface StateReferenceRow {
@@ -511,7 +540,7 @@ function searchIndexSelectColumns(alias?: string): string {
   return [
     'id', 'type', 'file', 'name', 'class', 'sig', 'loc', 'insight', 'generation_id',
     'namespace', 'decorators', 'visibility', 'is_async', 'is_static', 'parameters',
-    'return_type', 'extends_name', 'implements', 'imports', 'exports',
+    'return_type', 'extends_name', 'implements', 'imports', 'exports', 'refs',
   ].map(column => `${prefix}${column}`).join(', ');
 }
 
@@ -537,6 +566,7 @@ function mapSearchIndexRow(row: SearchIndexRow): SearchResult {
     implements: parseJsonArray(row.implements),
     imports: parseJsonArray(row.imports),
     exports: parseJsonArray(row.exports),
+    refs: parseJsonArray(row.refs),
   };
 }
 

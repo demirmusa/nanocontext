@@ -8,6 +8,7 @@ import { IConfigManager } from '../interfaces/IConfigManager';
 import { IParserRegistry } from '../interfaces/IParser';
 import { ILogger } from '../interfaces/ILogger';
 import { normalizeProjectPath, ProjectPathError } from '../../utils/projectPath';
+import { loadGitignorePatterns } from '../../utils/gitignore';
 
 export interface WatchProcessInfo {
   pid: number;
@@ -44,8 +45,9 @@ export class FileWatcher implements IFileWatcher {
       return path.join(projectRoot, root).replace(/\\/g, '/');
     });
 
-    // Merge config.exclude with .nanocontextignore
+    // Merge exclude patterns from config, .gitignore, and .nanocontextignore
     const ignorePatterns: string[] = [...config.exclude];
+    ignorePatterns.push(...loadGitignorePatterns(projectRoot));
     const ignorePath = path.join(projectRoot, '.nanocontextignore');
     if (fs.existsSync(ignorePath)) {
       const lines = fs.readFileSync(ignorePath, 'utf-8')

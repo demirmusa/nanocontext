@@ -14,6 +14,7 @@ import { HeaderJson, ScanProgress, VectorRecord, InsightGenerationResult, Method
 import { applyHeaderIdentity } from '../identity/recordIds';
 import { computeChecksum } from '../../utils/checksum';
 import { normalizeProjectPath } from '../../utils/projectPath';
+import { loadGitignorePatterns } from '../../utils/gitignore';
 import { ScanManifestService, INSIGHT_PROMPT_VERSION, PARSER_VERSION } from '../services/ScanManifestService';
 import { VECTOR_SCHEMA_VERSION } from '../embedding/CachedEmbeddingProvider';
 
@@ -113,8 +114,9 @@ export class StructurePipeline implements IStructurePipeline {
     });
     manifestStore.save(manifest);
 
-    // Read .nanocontextignore if it exists and merge with exclude patterns
+    // Merge exclude patterns from config, .gitignore, and .nanocontextignore
     const ignorePatterns = [...config.exclude];
+    ignorePatterns.push(...loadGitignorePatterns(projectRoot));
     const ignorePath = path.join(projectRoot, '.nanocontextignore');
     if (fs.existsSync(ignorePath)) {
       const ignoreContent = fs.readFileSync(ignorePath, 'utf-8');

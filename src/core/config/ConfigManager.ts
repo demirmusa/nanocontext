@@ -66,7 +66,7 @@ export class ConfigManager implements IConfigManager {
     return {
       version: 1,
       languages: [],
-      include: ['src/**/*'],
+      include: ['src/**/*', '**/*.md', '**/*.txt'],
       exclude: ['**/*.test.ts', '**/*.spec.ts', '**/node_modules/**', '**/*.min.js', '**/*.bundle.js'],
       aiInsight: true,
       aiInsightConcurrency: 20,

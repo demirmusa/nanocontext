@@ -221,6 +221,9 @@ export interface SmartSearchCandidate {
   insight?: string;
   text?: string;
   score?: number;
+  matchedBy?: SearchResult['matchedBy'];
+  scoreParts?: SearchResult['scoreParts'];
+  matchReason?: string;
 }
 
 export interface ProjectConfig {

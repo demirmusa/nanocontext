@@ -16,10 +16,13 @@ export function buildSmartSearchPrompt(
     refs: candidate.refs,
     insight: candidate.insight,
     text: candidate.text,
-    distance: candidate.score,
+    score: candidate.score,
+    matchedBy: candidate.matchedBy,
+    scoreParts: candidate.scoreParts,
+    reason: candidate.matchReason,
   })).join('\n');
 
-  return `You are reranking semantic code search candidates for a developer query.
+  return `You are reranking NanoContext code search candidates for a developer query.
 
 Query:
 ${query}
@@ -27,9 +30,12 @@ ${query}
 Task:
 - Select the candidates that are truly relevant to the query.
 - Return at most ${limit} candidates.
+- Prefer exact symbol, file, signature, refs, and insight matches when they answer the query.
+- Prefer actionable methods/classes over broad memories unless the memory directly answers the query.
+- Preserve the best execution order for the developer: most likely target first.
 - Prefer precision over recall.
 - Do not invent candidate IDs.
-- Distance is semantic vector distance, so lower values are usually better.
+- score is NanoContext's current hybrid score, so higher values are usually better.
 
 Return JSON only in this format:
 {"selectedIds":["candidate-id-1","candidate-id-2"]}

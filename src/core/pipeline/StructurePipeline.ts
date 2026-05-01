@@ -538,16 +538,35 @@ export class StructurePipeline implements IStructurePipeline {
 
     const records: VectorRecord[] = [];
     const pathContext = this.filePathKeywords(normalizedHeader.file);
+    const fileContext = [
+      normalizedHeader.file,
+      pathContext,
+      normalizedHeader.namespace,
+      ...normalizedHeader.imports,
+      ...normalizedHeader.exports,
+    ].filter(Boolean).join(' ');
 
     // Create vectors for methods
     for (const method of normalizedHeader.methods) {
       const textParts = [
-        normalizedHeader.file,
-        pathContext,
+        fileContext,
+        normalizedHeader.lang,
+        method.namespace || normalizedHeader.namespace || '',
         method.name,
+        this.splitIdentifier(method.name),
         method.class || '',
+        method.class ? this.splitIdentifier(method.class) : '',
+        method.class ? `${method.class}.${method.name}` : '',
+        method.class ? `${method.class}#${method.name}` : '',
         method.sig,
+        method.visibility || '',
+        method.isAsync ? 'async asynchronous promise task' : '',
+        method.isStatic ? 'static' : '',
+        ...(method.decorators || []),
+        ...(method.parameters || []),
+        method.returnType || '',
         ...(method.refs || []),
+        ...(method.stateRefs || []).map(ref => `${ref.kind} ${ref.path} ${ref.context ?? ''}`),
         method.insight || '',
       ].filter(Boolean);
 
@@ -567,6 +586,7 @@ export class StructurePipeline implements IStructurePipeline {
           refs: method.refs,
           insight: method.insight,
           lang: normalizedHeader.lang,
+          text,
           generationId: normalizedHeader.generationId,
         });
       } catch (err) {
@@ -576,12 +596,20 @@ export class StructurePipeline implements IStructurePipeline {
 
     // Create vectors for classes
     for (const cls of normalizedHeader.classes) {
+      const classMethods = normalizedHeader.methods
+        .filter(method => method.class === cls.name)
+        .flatMap(method => [method.name, this.splitIdentifier(method.name), method.sig, method.insight || '']);
       const textParts = [
-        normalizedHeader.file,
-        pathContext,
+        fileContext,
+        normalizedHeader.lang,
+        cls.namespace || normalizedHeader.namespace || '',
         cls.name,
+        this.splitIdentifier(cls.name),
         cls.extends || '',
         ...(cls.implements || []),
+        ...(cls.decorators || []),
+        cls.visibility || '',
+        ...classMethods,
         cls.insight || '',
       ].filter(Boolean);
 
@@ -598,6 +626,7 @@ export class StructurePipeline implements IStructurePipeline {
           loc: cls.loc,
           lang: normalizedHeader.lang,
           insight: cls.insight,
+          text,
           generationId: normalizedHeader.generationId,
         });
       } catch (err) {
@@ -632,6 +661,13 @@ export class StructurePipeline implements IStructurePipeline {
     }
 
     return methods;
+  }
+
+  private splitIdentifier(value: string): string {
+    return value
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .replace(/[._#:/\\-]+/g, ' ');
   }
 }
 

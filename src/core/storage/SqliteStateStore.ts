@@ -80,7 +80,8 @@ export class SqliteStateStore implements IStateStore {
         class,
         sig,
         insight,
-        refs
+        refs,
+        content
       );
 
       CREATE TABLE IF NOT EXISTS state_references (
@@ -183,7 +184,7 @@ export class SqliteStateStore implements IStateStore {
     const row = this.db!.prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'search_index_fts'"
     ).get() as { sql: string } | undefined;
-    if (row?.sql?.includes('refs')) return;
+    if (row?.sql?.includes('content')) return;
 
     this.db!.exec('DROP TABLE IF EXISTS search_index_fts');
     this.db!.exec(`
@@ -195,7 +196,8 @@ export class SqliteStateStore implements IStateStore {
         class,
         sig,
         insight,
-        refs
+        refs,
+        content
       );
     `);
   }
@@ -269,7 +271,7 @@ export class SqliteStateStore implements IStateStore {
       stringifyJson(metadata?.exports),
       stringifyJson(metadata?.refs),
     );
-    this.indexFts(id, 'method', file, name, className, sig, insight, metadata?.refs);
+    this.indexFts(id, 'method', file, name, className, sig, insight, metadata?.refs, metadata);
   }
 
   indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined, generationId?: string, metadata?: SymbolIndexMetadata): void {
@@ -293,7 +295,7 @@ export class SqliteStateStore implements IStateStore {
       stringifyJson(metadata?.exports),
       null,
     );
-    this.indexFts(id, 'class', file, name, name, undefined, insight, undefined);
+    this.indexFts(id, 'class', file, name, name, undefined, insight, undefined, metadata);
   }
 
   getFileIndexGenerations(file: string): string[] {
@@ -367,14 +369,68 @@ export class SqliteStateStore implements IStateStore {
   }
 
   searchExact(query: string, limit: number = 20): SearchResult[] {
-    const pattern = `%${query}%`;
+    const trimmed = query.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    const lowerQuery = trimmed.toLowerCase();
+    const pattern = `%${escapeLike(lowerQuery)}%`;
+    const candidateLimit = Math.max(limit * 50, 200);
+    const searchableFields = exactSearchFieldExpressions();
+    const where = searchableFields.map(expr => `${expr} LIKE ? ESCAPE '\\'`).join(' OR ');
+    const orderArgs = [
+      lowerQuery,
+      lowerQuery,
+      lowerQuery,
+      lowerQuery,
+      lowerQuery,
+      `${escapeLike(lowerQuery)}%`,
+      `${escapeLike(lowerQuery)}%`,
+      pattern,
+      pattern,
+      pattern,
+      pattern,
+    ];
+    const args = [
+      ...searchableFields.map(() => pattern),
+      ...orderArgs,
+      candidateLimit,
+    ];
     const rows = this.db!.prepare(
       `SELECT ${searchIndexSelectColumns()} FROM search_index
-       WHERE name LIKE ? OR sig LIKE ? OR class LIKE ? OR file LIKE ?
+       WHERE ${where}
+       ORDER BY
+        CASE
+          WHEN LOWER(name) = ? THEN 0
+          WHEN LOWER(COALESCE(class, '')) = ? THEN 1
+          WHEN LOWER(COALESCE(class, '') || '.' || name) = ? THEN 2
+          WHEN LOWER(COALESCE(class, '') || '#' || name) = ? THEN 2
+          WHEN LOWER(COALESCE(namespace, '') || '.' || name) = ? THEN 3
+          WHEN LOWER(name) LIKE ? ESCAPE '\\' THEN 4
+          WHEN LOWER(COALESCE(class, '')) LIKE ? ESCAPE '\\' THEN 5
+          WHEN LOWER(sig) LIKE ? ESCAPE '\\' THEN 6
+          WHEN LOWER(file) LIKE ? ESCAPE '\\' THEN 7
+          WHEN LOWER(COALESCE(insight, '')) LIKE ? ESCAPE '\\' THEN 8
+          WHEN LOWER(COALESCE(refs, '')) LIKE ? ESCAPE '\\' THEN 9
+          ELSE 20
+        END,
+        LENGTH(file) ASC,
+        name ASC
        LIMIT ?`
-    ).all(pattern, pattern, pattern, pattern, limit) as SearchIndexRow[];
+    ).all(...args) as SearchIndexRow[];
 
-    return rows.map(mapSearchIndexRow);
+    return rows
+      .map(row => ({
+        row,
+        score: scoreExactRow(trimmed, row),
+      }))
+      .sort((a, b) => b.score - a.score || a.row.file.localeCompare(b.row.file) || a.row.name.localeCompare(b.row.name))
+      .slice(0, limit)
+      .map(({ row, score }) => ({
+        ...mapSearchIndexRow(row),
+        score,
+      }));
   }
 
   searchLexical(query: string, limit: number = 20): SearchResult[] {
@@ -386,7 +442,7 @@ export class SqliteStateStore implements IStateStore {
     try {
       const rows = this.db!.prepare(
         `SELECT ${searchIndexSelectColumns('si')},
-                bm25(search_index_fts, 1.5, 3.0, 2.0, 1.2, 1.0, 0.8) AS rank
+                bm25(search_index_fts, 0.1, 0.1, 2.0, 5.0, 4.0, 2.5, 1.5, 1.0, 0.8) AS rank
          FROM search_index_fts
          JOIN search_index si ON si.id = search_index_fts.id
          WHERE search_index_fts MATCH ?
@@ -406,9 +462,28 @@ export class SqliteStateStore implements IStateStore {
   searchRegex(pattern: string, limit: number = 20): SearchResult[] {
     const rows = this.db!.prepare(
       `SELECT ${searchIndexSelectColumns()} FROM search_index
-       WHERE name REGEXP ? OR sig REGEXP ? OR class REGEXP ? OR file REGEXP ?
+       WHERE name REGEXP ?
+          OR sig REGEXP ?
+          OR class REGEXP ?
+          OR file REGEXP ?
+          OR insight REGEXP ?
+          OR refs REGEXP ?
+          OR namespace REGEXP ?
+          OR decorators REGEXP ?
+          OR parameters REGEXP ?
+          OR return_type REGEXP ?
+          OR extends_name REGEXP ?
+          OR implements REGEXP ?
+          OR imports REGEXP ?
+          OR exports REGEXP ?
+          OR (COALESCE(class, '') || '.' || name) REGEXP ?
+          OR (COALESCE(class, '') || '#' || name) REGEXP ?
        LIMIT ?`
-    ).all(pattern, pattern, pattern, pattern, limit) as SearchIndexRow[];
+    ).all(
+      pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern,
+      pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern,
+      limit,
+    ) as SearchIndexRow[];
 
     return rows.map(mapSearchIndexRow);
   }
@@ -455,11 +530,44 @@ export class SqliteStateStore implements IStateStore {
     sig: string | undefined,
     insight: string | undefined,
     refs: string[] | undefined,
+    metadata: SymbolIndexMetadata | undefined,
   ): void {
     this.db!.prepare('DELETE FROM search_index_fts WHERE id = ?').run(id);
+    this.insertFts(id, type, file, name, className, sig, insight, refs, metadata);
+  }
+
+  private insertFts(
+    id: string,
+    type: 'method' | 'class',
+    file: string,
+    name: string,
+    className: string | undefined,
+    sig: string | undefined,
+    insight: string | undefined,
+    refs: string[] | undefined,
+    metadata: SymbolIndexMetadata | undefined,
+  ): void {
     this.db!.prepare(
-      'INSERT INTO search_index_fts (id, type, file, name, class, sig, insight, refs) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, type, file, name, className ?? null, sig ?? null, insight ?? null, refs?.join(' ') ?? null);
+      'INSERT INTO search_index_fts (id, type, file, name, class, sig, insight, refs, content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      id,
+      type,
+      file,
+      name,
+      className ?? null,
+      sig ?? null,
+      insight ?? null,
+      refs?.join(' ') ?? null,
+      buildSearchContent({
+        file,
+        name,
+        className,
+        sig,
+        insight,
+        refs,
+        metadata,
+      }),
+    );
   }
 
   private rebuildSearchFts(): void {
@@ -470,21 +578,50 @@ export class SqliteStateStore implements IStateStore {
     }
 
     this.db!.exec('DELETE FROM search_index_fts');
-    this.db!.exec(`
-      INSERT INTO search_index_fts (id, type, file, name, class, sig, insight, refs)
-      SELECT id, type, file, name, class, sig, insight, refs FROM search_index
-    `);
+    const rows = this.db!.prepare(`SELECT ${searchIndexSelectColumns()} FROM search_index`).all() as SearchIndexRow[];
+    const insertMany = this.db!.transaction((items: SearchIndexRow[]) => {
+      for (const row of items) {
+        this.insertFts(
+          row.id,
+          row.type === 'class' ? 'class' : 'method',
+          row.file,
+          row.name,
+          row.class ?? undefined,
+          row.sig ?? undefined,
+          row.insight ?? undefined,
+          parseJsonArray(row.refs),
+          {
+            namespace: row.namespace ?? undefined,
+            decorators: parseJsonArray(row.decorators),
+            visibility: row.visibility ?? undefined,
+            isAsync: row.is_async === null ? undefined : Boolean(row.is_async),
+            isStatic: row.is_static === null ? undefined : Boolean(row.is_static),
+            parameters: parseJsonArray(row.parameters),
+            returnType: row.return_type ?? undefined,
+            extends: row.extends_name ?? undefined,
+            implements: parseJsonArray(row.implements),
+            imports: parseJsonArray(row.imports),
+            exports: parseJsonArray(row.exports),
+          },
+        );
+      }
+    });
+    insertMany(rows);
   }
 }
 
 function buildFtsQuery(query: string): string {
-  const terms = query
-    .split(/[^A-Za-z0-9_./#-]+/)
-    .map(term => term.trim())
-    .filter(term => term.length > 0)
-    .slice(0, 8);
+  const terms = searchableTerms(query).slice(0, 8);
+  if (terms.length === 0) {
+    return '';
+  }
 
-  return terms.map(term => `"${term.replace(/"/g, '""')}"`).join(' OR ');
+  const prefixTerms = terms.map(term => `${term}*`);
+  if (prefixTerms.length === 1) {
+    return prefixTerms[0];
+  }
+
+  return `(${prefixTerms.join(' AND ')}) OR (${prefixTerms.join(' OR ')})`;
 }
 
 function normalizeFtsRank(rank: number): number {
@@ -492,6 +629,146 @@ function normalizeFtsRank(rank: number): number {
     return 0;
   }
   return 1 / (1 + Math.max(0, Math.abs(rank)));
+}
+
+function exactSearchFieldExpressions(): string[] {
+  return [
+    'LOWER(name)',
+    "LOWER(COALESCE(class, ''))",
+    "LOWER(COALESCE(sig, ''))",
+    'LOWER(file)',
+    "LOWER(COALESCE(insight, ''))",
+    "LOWER(COALESCE(refs, ''))",
+    "LOWER(COALESCE(namespace, ''))",
+    "LOWER(COALESCE(decorators, ''))",
+    "LOWER(COALESCE(parameters, ''))",
+    "LOWER(COALESCE(return_type, ''))",
+    "LOWER(COALESCE(extends_name, ''))",
+    "LOWER(COALESCE(implements, ''))",
+    "LOWER(COALESCE(imports, ''))",
+    "LOWER(COALESCE(exports, ''))",
+    "LOWER(COALESCE(class, '') || '.' || name)",
+    "LOWER(COALESCE(class, '') || '#' || name)",
+    "LOWER(COALESCE(namespace, '') || '.' || name)",
+  ];
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, match => `\\${match}`);
+}
+
+function scoreExactRow(query: string, row: SearchIndexRow): number {
+  const q = query.toLowerCase();
+  const compactQuery = compactToken(query);
+  const terms = searchableTerms(query);
+  const name = row.name.toLowerCase();
+  const className = row.class?.toLowerCase() ?? '';
+  const qualifiedDot = className ? `${className}.${name}` : name;
+  const qualifiedHash = className ? `${className}#${name}` : name;
+  const namespaceName = row.namespace ? `${row.namespace.toLowerCase()}.${name}` : name;
+  const content = [
+    row.file,
+    row.name,
+    row.class,
+    row.sig,
+    row.insight,
+    row.refs,
+    row.namespace,
+    row.decorators,
+    row.parameters,
+    row.return_type,
+    row.extends_name,
+    row.implements,
+    row.imports,
+    row.exports,
+  ].filter(Boolean).join(' ').toLowerCase();
+  const contentTerms = new Set(searchableTerms(content));
+  let score = 0;
+
+  if (name === q) score += 10;
+  if (className === q) score += 9;
+  if (qualifiedDot === q || qualifiedHash === q || namespaceName === q) score += 12;
+  if (compactToken(row.name) === compactQuery || compactToken(row.class ?? '') === compactQuery) score += 7;
+  if (compactToken(qualifiedDot) === compactQuery || compactToken(qualifiedHash) === compactQuery) score += 9;
+  if (name.startsWith(q) || className.startsWith(q)) score += 5;
+  if (row.sig?.toLowerCase().includes(q)) score += 3;
+  if (row.file.toLowerCase().includes(q)) score += 2;
+  if (row.insight?.toLowerCase().includes(q)) score += 2;
+  if (row.refs?.toLowerCase().includes(q)) score += 1.5;
+
+  const matchedTerms = terms.filter(term => contentTerms.has(term)).length;
+  if (terms.length > 0) {
+    score += (matchedTerms / terms.length) * 3;
+    if (matchedTerms === terms.length) {
+      score += 2;
+    }
+  }
+
+  if (row.type === 'method') score += 0.3;
+  if (row.type === 'class') score += 0.2;
+  return Number(score.toFixed(6));
+}
+
+function buildSearchContent(input: {
+  file: string;
+  name: string;
+  className?: string;
+  sig?: string;
+  insight?: string;
+  refs?: string[];
+  metadata?: SymbolIndexMetadata;
+}): string {
+  const metadata = input.metadata;
+  const values = [
+    input.file,
+    path.basename(input.file, path.extname(input.file)),
+    input.name,
+    splitIdentifier(input.name),
+    input.className,
+    input.className ? splitIdentifier(input.className) : undefined,
+    input.className ? `${input.className}.${input.name}` : undefined,
+    input.className ? `${input.className}#${input.name}` : undefined,
+    input.sig,
+    input.insight,
+    ...(input.refs ?? []),
+    metadata?.namespace,
+    ...(metadata?.decorators ?? []),
+    metadata?.visibility,
+    metadata?.isAsync ? 'async asynchronous promise task' : undefined,
+    metadata?.isStatic ? 'static' : undefined,
+    ...(metadata?.parameters ?? []),
+    metadata?.returnType,
+    metadata?.extends,
+    ...(metadata?.implements ?? []),
+    ...(metadata?.imports ?? []),
+    ...(metadata?.exports ?? []),
+  ];
+
+  return values
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .flatMap(value => [value, splitIdentifier(value)])
+    .join(' ');
+}
+
+function searchableTerms(value: string): string[] {
+  const expanded = splitIdentifier(value);
+  const terms = expanded
+    .toLowerCase()
+    .split(/[^a-z0-9_]+/)
+    .map(term => term.trim())
+    .filter(term => term.length > 0 && term.length < 64);
+  return [...new Set(terms)];
+}
+
+function splitIdentifier(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/[._#:/\\-]+/g, ' ');
+}
+
+function compactToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9_]+/g, '');
 }
 
 interface SearchIndexRow {

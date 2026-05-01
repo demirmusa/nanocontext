@@ -1,12 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 
 const { OpenAILLMProvider } = require('../dist/core/llm/providers/OpenAILLMProvider');
+const { SearchEngine } = require('../dist/core/search/SearchEngine');
 const { SearchService } = require('../dist/core/services/SearchService');
 const { PrepareService, formatPrepareReport } = require('../dist/core/services/PrepareService');
 const { CodeReadService } = require('../dist/core/services/CodeReadService');
 const { MemoryService } = require('../dist/core/services/MemoryService');
 const { SearchFormatter } = require('../dist/core/search/SearchFormatter');
+const { SqliteStateStore } = require('../dist/core/storage/SqliteStateStore');
 const { createTempProject } = require('./helpers/project');
 
 function createConfigManager(projectRoot) {
@@ -58,6 +61,13 @@ function createSearchConfigManager(overrides = {}) {
   };
 }
 
+const logger = {
+  info() {},
+  warn() {},
+  error() {},
+  debug() {},
+};
+
 test('openai smart rerank omits unsupported temperature from chat completion request', async () => {
   const provider = new OpenAILLMProvider({ apiKey: 'test-key', model: 'gpt-5-mini-2025-08-07' });
   let capturedRequest;
@@ -89,6 +99,104 @@ test('openai smart rerank omits unsupported temperature from chat completion req
   assert.deepEqual(result.selectedIds, ['candidate-1']);
   assert.equal(capturedRequest.temperature, undefined);
   assert.equal(capturedRequest.model, 'gpt-5-mini-2025-08-07');
+});
+
+test('sqlite search index ranks qualified symbols and searches insight refs metadata', async (t) => {
+  const projectRoot = createTempProject();
+
+  const stateStore = new SqliteStateStore(projectRoot);
+  await stateStore.initialize();
+  t.after(() => {
+    stateStore.close();
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  stateStore.indexMethod(
+    'method:build-token',
+    'src/auth/AuthService.ts',
+    'BuildToken',
+    'AuthService',
+    'BuildToken(userId: string): string',
+    '10-20',
+    'issues refresh token for authenticated users',
+    'gen_1',
+    {
+      namespace: 'Demo.Auth',
+      imports: ['import { JwtSigner } from "./jwt"'],
+      exports: ['AuthService'],
+      refs: ['JwtSigner.sign', 'RefreshToken'],
+      parameters: ['userId: string'],
+      returnType: 'string',
+    },
+  );
+  stateStore.indexMethod(
+    'method:build-report',
+    'src/reports/AuthReport.ts',
+    'BuildReport',
+    'AuthReport',
+    'BuildReport(): string',
+    '30-40',
+    'renders an auth report',
+  );
+
+  const [qualified] = stateStore.searchExact('AuthService.BuildToken', 5);
+  assert.equal(qualified.id, 'method:build-token');
+  assert.equal(qualified.score > 0, true);
+
+  const [insight] = stateStore.searchExact('authenticated users', 5);
+  assert.equal(insight.id, 'method:build-token');
+
+  const [refMatch] = stateStore.searchRegex('JwtSigner', 5);
+  assert.equal(refMatch.id, 'method:build-token');
+});
+
+test('hybrid search matches split camel case symbols through the lexical index', async (t) => {
+  const projectRoot = createTempProject();
+
+  const stateStore = new SqliteStateStore(projectRoot);
+  await stateStore.initialize();
+  t.after(() => {
+    stateStore.close();
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  stateStore.indexMethod(
+    'method:build-token',
+    'src/auth/AuthService.ts',
+    'BuildToken',
+    'AuthService',
+    'BuildToken(userId: string): string',
+    '10-20',
+    undefined,
+  );
+
+  const searchEngine = new SearchEngine(
+    {
+      initialize: async () => {},
+      upsert: async () => {},
+      remove: async () => {},
+      removeByFile: async () => {},
+      search: async () => [],
+      clear: async () => {},
+      count: async () => 0,
+    },
+    null,
+    {
+      read: async () => null,
+      write: async () => {},
+      remove: async () => {},
+      exists: () => false,
+      getHeaderPath: () => '',
+    },
+    createMemoryStore(),
+    stateStore,
+    logger,
+    3,
+  );
+
+  const [result] = await searchEngine.search('build token', 1);
+  assert.equal(result.id, 'method:build-token');
+  assert.deepEqual(result.matchedBy?.includes('name'), true);
 });
 
 test('search service normalizes exact misses and attaches suggested next actions', async () => {
@@ -486,6 +594,44 @@ test('search service routes natural-language queries through vector search and e
   assert.equal(vectorCalls, 1);
   assert.equal(result.searchIntent, 'semantic');
   assert.deepEqual(result.searchTelemetry.fallbackPath, ['intent:semantic', 'vector']);
+});
+
+test('smart search reranks natural-language default search before returning results', async () => {
+  let vectorLimit = 0;
+  const service = new SearchService(
+    {
+      search: async (_query, limit) => {
+        vectorLimit = limit;
+        return [
+          { type: 'method', id: 'method:generic', file: 'src/generic.ts', method: 'handle', loc: '1-5' },
+          { type: 'method', id: 'method:auth', file: 'src/auth.ts', method: 'refreshToken', loc: '10-20', sig: 'refreshToken(user)' },
+          { type: 'class', id: 'class:auth', file: 'src/auth.ts', class: 'AuthService', loc: '1-80' },
+        ];
+      },
+      searchDeep: async () => [],
+      searchExact: () => [],
+      searchRegex: () => [],
+      searchRegexDeep: async () => [],
+    },
+    createSearchConfigManager({ smartSearchEnabled: true, smartSearchCandidateMultiplier: 3 }),
+    {
+      name: 'fake-llm',
+      isAvailable: async () => true,
+      generateFileInsights: async () => ({ insights: [], rawResponse: '' }),
+      selectRelevantSearchResults: async (_query, candidates, limit) => {
+        assert.equal(limit, 1);
+        assert.equal(candidates.length, 3);
+        return { selectedIds: [candidates[1].id], rawResponse: '' };
+      },
+    },
+    logger,
+  );
+
+  const [result] = await service.execute({ mode: 'exact', query: 'user authentication token refresh', limit: 1 });
+  assert.equal(vectorLimit, 3);
+  assert.equal(result.id, 'method:auth');
+  assert.deepEqual(result.searchTelemetry.fallbackPath, ['intent:semantic', 'vector', 'rerank']);
+  assert.equal(result.searchTelemetry.rerankUsed, true);
 });
 
 test('search formatter prints compact fallback headings before grouped hits', () => {

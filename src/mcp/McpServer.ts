@@ -34,6 +34,7 @@ const text = (s: string) => ({ content: [{ type: T, text: s }] });
 const KEY_MAP: Record<string, string> = {
   type: 't', file: 'f', method: 'm', class: 'c', loc: 'l',
   score: 's', sig: 'sg', insight: 'i', refs: 'r', text: 'x',
+  matchedBy: 'mb', scoreParts: 'sp', matchReason: 'mr', memoryHint: 'mh',
   suggestedNext: 'n', suggestedNextReason: 'nr', suggestedNextConfidence: 'nc',
   related: 'rel', searchIntent: 'si', searchTelemetry: 'st', fallback: 'fb',
 };

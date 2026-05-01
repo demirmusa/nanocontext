@@ -31,7 +31,7 @@ export class SearchEngine implements ISearchEngine {
 
   async search(query: string, limit?: number, typeFilter?: string): Promise<SearchResult[]> {
     const maxResults = limit || this.defaultLimit;
-    const candidateLimit = Math.max(maxResults * 4, maxResults);
+    const candidateLimit = resolveHybridCandidateLimit(maxResults);
     const normalizedTypeFilter = typeFilter && typeFilter !== 'all' ? typeFilter : undefined;
     const candidates = new Map<string, RankedCandidate>();
 
@@ -230,23 +230,58 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function lexicalBoostScore(query: string, result: Pick<SearchResult, 'file' | 'method' | 'class' | 'sig' | 'text'>): number {
-  const q = query.toLowerCase();
+function resolveHybridCandidateLimit(limit: number): number {
+  return Math.max(limit * 8, 24);
+}
+
+function splitIdentifier(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/[._#:/\\-]+/g, ' ');
+}
+
+function compactToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9_]+/g, '');
+}
+
+function lexicalBoostScore(query: string, result: Pick<SearchResult, 'file' | 'method' | 'class' | 'sig' | 'refs' | 'insight' | 'text'>): number {
+  const q = query.toLowerCase().trim();
+  const compactQuery = compactToken(query);
+  const queryTerms = tokenize(query);
   let score = 0;
   const file = result.file?.toLowerCase() ?? '';
   const method = result.method?.toLowerCase() ?? '';
   const cls = result.class?.toLowerCase() ?? '';
   const sig = result.sig?.toLowerCase() ?? '';
+  const refs = result.refs?.join(' ').toLowerCase() ?? '';
+  const insight = result.insight?.toLowerCase() ?? '';
   const text = result.text?.toLowerCase() ?? '';
+  const symbolText = [method, cls, `${cls}.${method}`, `${cls}#${method}`].filter(Boolean).join(' ');
+  const allText = [file, symbolText, sig, refs, insight, text].join(' ');
+  const allTokens = new Set(tokenize(allText));
 
-  if (method === q || cls === q || `${cls}.${method}` === q) score += 5;
+  if (method === q || cls === q || `${cls}.${method}` === q || `${cls}#${method}` === q) score += 6;
+  if (compactToken(method) === compactQuery || compactToken(cls) === compactQuery) score += 5;
+  if (compactToken(`${cls}.${method}`) === compactQuery || compactToken(`${cls}#${method}`) === compactQuery) score += 6;
   if (file.includes(q)) score += 3;
   if (sig.includes(q)) score += 2;
+  if (insight.includes(q)) score += 2;
+  if (refs.includes(q)) score += 1.5;
   if (text.includes(q)) score += 2;
 
-  for (const token of q.split(/\s+/).filter(Boolean)) {
-    if (method.includes(token) || cls.includes(token)) score += 1.5;
-    if (file.includes(token) || sig.includes(token) || text.includes(token)) score += 0.5;
+  if (queryTerms.length > 0) {
+    const matchedTerms = queryTerms.filter(term => allTokens.has(term)).length;
+    score += (matchedTerms / queryTerms.length) * 2.5;
+    if (matchedTerms === queryTerms.length) {
+      score += 2;
+    }
+  }
+
+  for (const token of queryTerms) {
+    if (token.length < 2) continue;
+    if (tokenize(symbolText).includes(token)) score += 1.5;
+    if (file.includes(token) || sig.includes(token) || refs.includes(token) || insight.includes(token) || text.includes(token)) score += 0.5;
   }
 
   return score;
@@ -254,16 +289,25 @@ function lexicalBoostScore(query: string, result: Pick<SearchResult, 'file' | 'm
 
 function symbolBoostScore(query: string, result: Pick<SearchResult, 'method' | 'class'>): number {
   const q = query.toLowerCase();
+  const compactQuery = compactToken(query);
   const method = result.method?.toLowerCase() ?? '';
   const cls = result.class?.toLowerCase() ?? '';
   let score = 0;
 
   if (method === q || cls === q || `${cls}.${method}` === q || `${cls}#${method}` === q) {
+    score += 6;
+  }
+
+  if (compactToken(method) === compactQuery || compactToken(cls) === compactQuery) {
+    score += 4;
+  }
+
+  if (compactToken(`${cls}.${method}`) === compactQuery || compactToken(`${cls}#${method}`) === compactQuery) {
     score += 5;
   }
 
   for (const token of tokenize(query)) {
-    if (method === token || cls === token) {
+    if (tokenize(method).includes(token) || tokenize(cls).includes(token)) {
       score += 1.5;
     }
   }
@@ -288,7 +332,11 @@ function pathProximityScore(query: string, file: string | undefined): number {
 }
 
 function tokenize(value: string): string[] {
-  return value.toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
+  return splitIdentifier(value)
+    .toLowerCase()
+    .split(/[^a-z0-9_]+/)
+    .map(token => token.trim())
+    .filter(token => token.length > 0);
 }
 
 function normalizeNativeScore(signal: SearchSignal, score: number | undefined): number {
@@ -296,7 +344,7 @@ function normalizeNativeScore(signal: SearchSignal, score: number | undefined): 
     return 0;
   }
   if (signal === 'vector') {
-    return Math.max(0, 1 - Math.max(0, score as number));
+    return 1 / (1 + Math.max(0, score as number));
   }
   if (signal === 'lexical') {
     return Math.max(0, score as number);
@@ -305,7 +353,9 @@ function normalizeNativeScore(signal: SearchSignal, score: number | undefined): 
 }
 
 function typePriorityScore(result: SearchResult): number {
-  return result.type === 'memory' ? 0 : 0.2;
+  if (result.type === 'method') return 0.3;
+  if (result.type === 'class') return 0.2;
+  return 0;
 }
 
 function buildScoreParts(
@@ -344,11 +394,16 @@ function roundScoreParts(parts: NonNullable<SearchResult['scoreParts']>): NonNul
 
 function detectMatchedBy(query: string, result: SearchResult): NonNullable<SearchResult['matchedBy']> {
   const q = query.toLowerCase();
+  const compactQuery = compactToken(query);
   const tokens = tokenize(query);
   const matches = new Set<NonNullable<SearchResult['matchedBy']>[number]>();
   const hasMatch = (value: string | undefined): boolean => {
     const lower = value?.toLowerCase() ?? '';
-    return lower.includes(q) || tokens.some(token => lower.includes(token));
+    const compact = compactToken(value ?? '');
+    const valueTokens = new Set(tokenize(value ?? ''));
+    return lower.includes(q)
+      || (compactQuery.length > 0 && compact.includes(compactQuery))
+      || tokens.some(token => valueTokens.has(token) || lower.includes(token));
   };
 
   if (hasMatch(result.method)) matches.add('name');
@@ -399,5 +454,17 @@ function mergeResults(primary: SearchResult, next: SearchResult): SearchResult {
     refs: primary.refs ?? next.refs,
     insight: primary.insight ?? next.insight,
     text: primary.text ?? next.text,
+    generationId: primary.generationId ?? next.generationId,
+    namespace: primary.namespace ?? next.namespace,
+    decorators: primary.decorators ?? next.decorators,
+    visibility: primary.visibility ?? next.visibility,
+    isAsync: primary.isAsync ?? next.isAsync,
+    isStatic: primary.isStatic ?? next.isStatic,
+    parameters: primary.parameters ?? next.parameters,
+    returnType: primary.returnType ?? next.returnType,
+    extends: primary.extends ?? next.extends,
+    implements: primary.implements ?? next.implements,
+    imports: primary.imports ?? next.imports,
+    exports: primary.exports ?? next.exports,
   };
 }

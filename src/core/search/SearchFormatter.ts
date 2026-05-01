@@ -18,7 +18,7 @@ export class SearchFormatter {
 
     const lines: string[] = [];
     if (fallback) {
-      lines.push(`fallback: ${fallback.mode} (${fallback.reason})`);
+      lines.push(`fallback: ${fallback.mode} from ${fallback.from} for "${fallback.originalQuery}" (${fallback.reason})`);
       lines.push('');
     }
 
@@ -124,6 +124,9 @@ export class SearchFormatter {
       }
       if (result.related?.length) {
         lines.push(`   related: ${result.related.map(item => `${item.method || item.class}[${item.loc}]`).join(', ')}`);
+      }
+      if (result.suggestedNext) {
+        lines.push(`   next: ${result.suggestedNext}`);
       }
     }
 

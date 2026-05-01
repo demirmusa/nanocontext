@@ -6,6 +6,16 @@ import { ISearchEngine } from '../interfaces/ISearchEngine';
 import { SearchResult, SmartSearchCandidate } from '../interfaces/types';
 
 type SearchFallback = NonNullable<SearchResult['fallback']>;
+type SearchConfig = {
+  limit: number;
+  smartSearchEnabled: boolean;
+  smartSearchCandidateMultiplier: number;
+};
+type VectorRouteResult = {
+  results: SearchResult[];
+  fallbackPath: string[];
+  rerankUsed?: boolean;
+};
 
 export type SearchMode = 'exact' | 'regex' | 'vector';
 export type SearchTypeFilter = 'method' | 'class' | 'memory' | 'all';
@@ -34,7 +44,7 @@ export class SearchService {
     const searchConfig = await this.resolveSearchConfig(request.limit);
     const limit = searchConfig.limit;
     const intent = classifyIntent(request.query);
-    const cacheKey = this.buildCacheKey(request, limit);
+    const cacheKey = this.buildCacheKey(request, searchConfig);
     const cached = this.resultCache.get(cacheKey);
     if (cached) {
       return cached.map(result => ({ ...result }));
@@ -53,27 +63,18 @@ export class SearchService {
     }
 
     if (request.mode === 'vector') {
-      if (searchConfig.smartSearchEnabled) {
-        results = await this.executeSmartVectorSearch(request, limit, intent, searchConfig.smartSearchCandidateMultiplier);
-        this.storeCachedResults(cacheKey, results);
-        return results;
-      }
-      if (request.deep) {
-        results = await this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.searchDeep(request.query, limit, request.typeFilter)), request.query, intent, ['vector']);
-        this.storeCachedResults(cacheKey, results);
-        return results;
-      }
-      results = await this.finalizeResults(this.attachSuggestedNext(request.mode, await this.searchEngine.search(request.query, limit, request.typeFilter)), request.query, intent, ['vector']);
+      results = await this.executeVectorRoute(request, searchConfig, intent, ['vector'], 'vector');
       this.storeCachedResults(cacheKey, results);
       return results;
     }
 
     if (intent === 'semantic' && request.mode === 'exact') {
-      const semanticResults = await this.finalizeResults(
-        this.attachSuggestedNext('vector', await this.searchEngine.search(request.query, limit, request.typeFilter)),
-        request.query,
+      const semanticResults = await this.executeVectorRoute(
+        { ...request, mode: 'vector' },
+        searchConfig,
         intent,
         ['intent:semantic', 'vector'],
+        'vector',
       );
       this.storeCachedResults(cacheKey, semanticResults);
       return semanticResults;
@@ -107,18 +108,21 @@ export class SearchService {
       }
     }
 
-    const emptyKey = this.buildEmptyQueryKey(request, limit);
+    const emptyKey = this.buildEmptyQueryKey(request, searchConfig);
     const emptyCount = (this.emptyQueryCounts.get(emptyKey) ?? 0) + 1;
     this.emptyQueryCounts.set(emptyKey, emptyCount);
 
-    const semanticResults = this.attachSuggestedNext(
-      'vector',
-      await this.searchEngine.search(normalizedQuery || request.query, limit, request.typeFilter),
+    const fallbackQuery = normalizedQuery || request.query;
+    const semanticRoute = await this.collectVectorResults(
+      { ...request, mode: 'vector', query: fallbackQuery },
+      searchConfig,
+      intent,
+      ['exact', 'semantic-fallback'],
     );
-    if (semanticResults.length > 0) {
+    if (semanticRoute.results.length > 0) {
       results = await this.finalizeResults(
         this.markFallbackResults(
-          semanticResults,
+          this.attachSuggestedNext('vector', semanticRoute.results),
           request.query,
           'semantic',
           'exact',
@@ -126,7 +130,8 @@ export class SearchService {
         ),
         request.query,
         intent,
-        ['exact', 'semantic-fallback'],
+        semanticRoute.fallbackPath,
+        semanticRoute.rerankUsed,
       );
       this.storeCachedResults(cacheKey, results);
       return results;
@@ -135,23 +140,56 @@ export class SearchService {
     return [];
   }
 
-  private async executeSmartVectorSearch(
+  private async executeVectorRoute(
     request: SearchRequest,
-    limit: number,
+    searchConfig: SearchConfig,
     intent: SearchResult['searchIntent'],
-    candidateMultiplier: number,
+    fallbackPath: string[],
+    suggestionMode: SearchMode,
   ): Promise<SearchResult[]> {
-    if (!this.llmProvider) {
-      throw new Error('Smart search requires a configured LLM provider. Re-run `nc init` and enable an LLM provider.');
+    const route = await this.collectVectorResults(request, searchConfig, intent, fallbackPath);
+    return this.finalizeResults(
+      this.attachSuggestedNext(suggestionMode, route.results),
+      request.query,
+      intent,
+      route.fallbackPath,
+      route.rerankUsed,
+    );
+  }
+
+  private async collectVectorResults(
+    request: SearchRequest,
+    searchConfig: SearchConfig,
+    intent: SearchResult['searchIntent'],
+    fallbackPath: string[],
+  ): Promise<VectorRouteResult> {
+    const { limit } = searchConfig;
+
+    if (!searchConfig.smartSearchEnabled) {
+      return {
+        results: await this.runVectorSearch(request, limit),
+        fallbackPath,
+      };
     }
 
-    const candidateLimit = this.resolveCandidateLimit(limit, candidateMultiplier, intent);
-    const candidates = request.deep
-      ? await this.searchEngine.searchDeep(request.query, candidateLimit, request.typeFilter)
-      : await this.searchEngine.search(request.query, candidateLimit, request.typeFilter);
+    if (!this.llmProvider) {
+      this.logger?.warn('Smart search is enabled but no LLM provider is configured; falling back to hybrid vector ordering.');
+      return {
+        results: await this.runVectorSearch(request, limit),
+        fallbackPath: [...fallbackPath, 'rerank-unavailable'],
+        rerankUsed: false,
+      };
+    }
+
+    const candidateLimit = this.resolveCandidateLimit(limit, searchConfig.smartSearchCandidateMultiplier, intent);
+    const candidates = await this.runVectorSearch(request, candidateLimit);
 
     if (candidates.length <= limit) {
-      return this.finalizeResults(this.attachSuggestedNext(request.mode, candidates), request.query, intent, ['vector', 'rerank-skipped'], false);
+      return {
+        results: candidates,
+        fallbackPath: [...fallbackPath, 'rerank-skipped'],
+        rerankUsed: false,
+      };
     }
 
     const mappedCandidates = candidates.map((candidate, index) => ({
@@ -167,20 +205,30 @@ export class SearchService {
       );
       const selectedResults = this.applySmartSearchSelection(mappedCandidates, selection.selectedIds, limit);
       if (selectedResults.length > 0) {
-        return this.finalizeResults(this.attachSuggestedNext(request.mode, selectedResults), request.query, intent, ['vector', 'rerank'], true);
+        return {
+          results: selectedResults,
+          fallbackPath: [...fallbackPath, 'rerank'],
+          rerankUsed: true,
+        };
       }
     } catch (error) {
       this.logger?.warn('Smart search rerank failed, falling back to vector ordering:', error);
     }
 
-    return this.finalizeResults(this.attachSuggestedNext(request.mode, candidates.slice(0, limit)), request.query, intent, ['vector', 'rerank-fallback'], false);
+    return {
+      results: candidates.slice(0, limit),
+      fallbackPath: [...fallbackPath, 'rerank-fallback'],
+      rerankUsed: false,
+    };
   }
 
-  private async resolveSearchConfig(requestedLimit?: number): Promise<{
-    limit: number;
-    smartSearchEnabled: boolean;
-    smartSearchCandidateMultiplier: number;
-  }> {
+  private async runVectorSearch(request: SearchRequest, limit: number): Promise<SearchResult[]> {
+    return request.deep
+      ? this.searchEngine.searchDeep(request.query, limit, request.typeFilter)
+      : this.searchEngine.search(request.query, limit, request.typeFilter);
+  }
+
+  private async resolveSearchConfig(requestedLimit?: number): Promise<SearchConfig> {
     const config = await this.configManager.loadProjectConfig();
     const fallbackLimit = config.search.defaultLimit;
     const maxLimit = Math.max(1, config.search.maxLimit);
@@ -208,6 +256,9 @@ export class SearchService {
       insight: result.insight,
       text: result.text,
       score: result.score,
+      matchedBy: result.matchedBy,
+      scoreParts: result.scoreParts,
+      matchReason: result.matchReason,
     };
   }
 
@@ -275,19 +326,22 @@ export class SearchService {
     return `${Math.max(1, start - padding)}-${end + padding}`;
   }
 
-  private buildCacheKey(request: SearchRequest, limit: number): string {
+  private buildCacheKey(request: SearchRequest, searchConfig: SearchConfig): string {
     return [
       request.mode,
       request.deep ? 'deep' : 'shallow',
       request.typeFilter ?? 'all',
-      limit,
+      searchConfig.limit,
+      searchConfig.smartSearchEnabled ? 'smart' : 'plain',
+      searchConfig.smartSearchCandidateMultiplier,
+      this.llmProvider ? 'llm' : 'no-llm',
       classifyIntent(request.query),
       normalizeSearchQuery(request.query).toLowerCase(),
     ].join('::');
   }
 
-  private buildEmptyQueryKey(request: SearchRequest, limit: number): string {
-    return this.buildCacheKey(request, limit);
+  private buildEmptyQueryKey(request: SearchRequest, searchConfig: SearchConfig): string {
+    return this.buildCacheKey(request, searchConfig);
   }
 
   private markFallbackResults(
@@ -416,7 +470,10 @@ function clusterResults(results: SearchResult[]): SearchResult[] {
 
   const clustered: SearchResult[] = [];
   for (const list of grouped.values()) {
-    list.sort((a, b) => (b.suggestedNextConfidence ?? 0) - (a.suggestedNextConfidence ?? 0));
+    list.sort((a, b) =>
+      ((b.suggestedNextConfidence ?? 0) - (a.suggestedNextConfidence ?? 0))
+      || ((b.score ?? 0) - (a.score ?? 0))
+    );
     const [primary, ...rest] = list;
     if (!primary) continue;
     clustered.push({

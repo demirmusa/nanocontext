@@ -105,11 +105,11 @@ export class DependencyService {
     const seen = new Set<string>();
 
     for (const ref of resolved.method.refs ?? []) {
-      const match = await this.resolveSymbol(ref, { limit: 5 });
+      const match = await this.resolveSymbol(ref, { limit: 5, sourceFile: resolved.file });
       if (match) {
         const relation = this.toRelation(match.file, match.method, 'callee', {
-          confidence: match.displaySymbol === ref || this.buildSelectorSet(match.method).has(ref) ? 'high' : 'medium',
-          reason: `resolved from ref ${ref}`,
+          confidence: match.importAware ? 'high' : match.displaySymbol === ref || this.buildSelectorSet(match.method).has(ref) ? 'high' : 'medium',
+          reason: match.importAware ? `resolved from imported ref ${ref}` : `resolved from ref ${ref}`,
         });
         const key = `${relation.path}:${relation.symbol}:${relation.range}`;
         if (!seen.has(key)) {
@@ -199,7 +199,7 @@ export class DependencyService {
 
   private async resolveSymbol(
     symbol: string,
-    options: { limit?: number } = {},
+    options: { limit?: number; sourceFile?: string } = {},
   ): Promise<ResolvedMethod | null> {
     const rawSymbol = symbol.trim();
     if (!rawSymbol) {
@@ -228,6 +228,7 @@ export class DependencyService {
     }
 
     const limit = Math.max(3, options.limit ?? 10);
+    const importContext = options.sourceFile ? await this.buildImportContext(options.sourceFile) : { preferredFiles: new Set<string>(), importedNames: new Set<string>() };
     const candidates = dedupeSearchResults([
       ...this.stateStore.searchExact(rawSymbol, limit),
       ...this.stateStore.searchRegex(escapeRegex(rawSymbol), limit),
@@ -247,12 +248,12 @@ export class DependencyService {
       const normalizedHeader = applyHeaderIdentity(header);
       const directMatches = this.resolveMethods(normalizedHeader.methods, rawSymbol);
       for (const method of directMatches) {
-        ranked.push(this.toResolvedMethod(candidate.file, method, rawSymbol, candidate, true));
+        ranked.push(this.toResolvedMethod(candidate.file, method, rawSymbol, candidate, true, importContext));
       }
 
       const fallback = normalizedHeader.methods.find(method => method.id === candidate.id || method.loc === candidate.loc);
       if (fallback) {
-        ranked.push(this.toResolvedMethod(candidate.file, fallback, rawSymbol, candidate, false));
+        ranked.push(this.toResolvedMethod(candidate.file, fallback, rawSymbol, candidate, false, importContext));
       }
     }
 
@@ -394,17 +395,63 @@ export class DependencyService {
     selector: string,
     candidate: SearchResult,
     directMatch: boolean,
+    importContext: ImportContext,
   ): ResolvedMethod {
     const candidateSymbol = method.class ? `${method.class}#${method.name}` : method.name;
-    const score = scoreMethodMatch(method, selector, candidate, directMatch);
+    const importAware = importContext.preferredFiles.has(file) || importContext.importedNames.has(method.class ?? '') || importContext.importedNames.has(method.name);
+    const score = scoreMethodMatch(method, selector, candidate, directMatch) + (importAware ? 25 : 0);
     return {
       file,
       method,
       selector,
       displaySymbol: candidateSymbol,
-      matchSource: directMatch ? 'symbol' : 'index fallback',
+      matchSource: importAware ? 'import' : directMatch ? 'symbol' : 'index fallback',
       score,
+      importAware,
     };
+  }
+
+  private async buildImportContext(sourceFile: string): Promise<ImportContext> {
+    const preferredFiles = new Set<string>([sourceFile]);
+    const importedNames = new Set<string>();
+    const sourceHeader = await this.headerStore.read(sourceFile);
+    if (!sourceHeader) {
+      return { preferredFiles, importedNames };
+    }
+
+    for (const importText of sourceHeader.imports ?? []) {
+      for (const importedName of extractImportedNames(importText)) {
+        importedNames.add(importedName);
+      }
+
+      const relativeTarget = resolveRelativeImport(sourceFile, importText, this.stateStore.listTrackedFiles());
+      if (relativeTarget) {
+        preferredFiles.add(relativeTarget);
+      }
+
+      const namespaceTarget = await this.findExportedImportTarget(importText);
+      if (namespaceTarget) {
+        preferredFiles.add(namespaceTarget);
+      }
+    }
+
+    return { preferredFiles, importedNames };
+  }
+
+  private async findExportedImportTarget(importText: string): Promise<string | undefined> {
+    const importedNames = extractImportedNames(importText);
+    if (importedNames.length === 0) {
+      return undefined;
+    }
+
+    for (const file of this.stateStore.listTrackedFiles()) {
+      const header = await this.headerStore.read(file);
+      if (!header) continue;
+      if (header.exports.some(exported => importedNames.includes(exported))) {
+        return file;
+      }
+    }
+    return undefined;
   }
 }
 
@@ -415,11 +462,76 @@ interface ResolvedMethod {
   displaySymbol: string;
   matchSource: string;
   score: number;
+  importAware?: boolean;
   warning?: string;
+}
+
+interface ImportContext {
+  preferredFiles: Set<string>;
+  importedNames: Set<string>;
 }
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractImportedNames(importText: string): string[] {
+  const names = new Set<string>();
+  const braceMatch = importText.match(/\{([^}]+)\}/);
+  if (braceMatch) {
+    for (const part of braceMatch[1].split(',')) {
+      const [name, alias] = part.split(/\s+as\s+/i).map(value => value.trim()).filter(Boolean);
+      if (alias) names.add(alias);
+      if (name) names.add(name);
+    }
+  }
+
+  const defaultMatch = importText.match(/import\s+([A-Za-z_$][\w$]*)\s+from/);
+  if (defaultMatch) names.add(defaultMatch[1]);
+
+  const csharpMatch = importText.match(/^[A-Z_][\w.]+$/i);
+  if (csharpMatch) {
+    const segments = importText.split('.');
+    names.add(segments[segments.length - 1]);
+    names.add(importText);
+  }
+
+  return Array.from(names);
+}
+
+function resolveRelativeImport(sourceFile: string, importText: string, trackedFiles: string[]): string | undefined {
+  const match = importText.match(/from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\)/);
+  const specifier = match?.[1] ?? match?.[2];
+  if (!specifier?.startsWith('.')) {
+    return undefined;
+  }
+
+  const sourceDir = sourceFile.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+  const normalized = normalizeSegments(`${sourceDir}/${specifier}`);
+  const candidates = [
+    normalized,
+    `${normalized}.ts`,
+    `${normalized}.tsx`,
+    `${normalized}.js`,
+    `${normalized}.jsx`,
+    `${normalized}/index.ts`,
+    `${normalized}/index.tsx`,
+    `${normalized}/index.js`,
+  ];
+  return trackedFiles.find(file => candidates.includes(file.replace(/\\/g, '/')));
+}
+
+function normalizeSegments(value: string): string {
+  const parts: string[] = [];
+  for (const segment of value.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      parts.pop();
+      continue;
+    }
+    parts.push(segment);
+  }
+  return parts.join('/');
 }
 
 function scoreMethodMatch(method: MethodInfo, selector: string, candidate: SearchResult, directMatch: boolean): number {

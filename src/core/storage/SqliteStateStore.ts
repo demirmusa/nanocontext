@@ -56,7 +56,8 @@ export class SqliteStateStore implements IStateStore {
         class TEXT,
         sig TEXT,
         loc TEXT,
-        insight TEXT
+        insight TEXT,
+        generation_id TEXT
       );
 
       CREATE VIRTUAL TABLE IF NOT EXISTS search_index_fts USING fts5(
@@ -71,6 +72,7 @@ export class SqliteStateStore implements IStateStore {
     `);
 
     this.migrateInsightQueue();
+    this.migrateSearchIndexGeneration();
     this.rebuildSearchFts();
   }
 
@@ -121,6 +123,14 @@ export class SqliteStateStore implements IStateStore {
     this.db!.prepare('DELETE FROM search_index_fts WHERE file = ?').run(filePath);
   }
 
+  private migrateSearchIndexGeneration(): void {
+    const columns = this.db!.prepare("PRAGMA table_info('search_index')").all() as Array<{ name: string }>;
+    const hasGenerationId = columns.some(column => column.name === 'generation_id');
+    if (!hasGenerationId) {
+      this.db!.exec('ALTER TABLE search_index ADD COLUMN generation_id TEXT');
+    }
+  }
+
   enqueueInsight(item: InsightQueueItem): void {
     this.db!.prepare(
       'INSERT OR IGNORE INTO insight_queue (file, method_id, method_name, method_code, status, retries, queued_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -169,18 +179,25 @@ export class SqliteStateStore implements IStateStore {
     return row.count > 0;
   }
 
-  indexMethod(id: string, file: string, name: string, className: string | undefined, sig: string, loc: string, insight: string | undefined): void {
+  indexMethod(id: string, file: string, name: string, className: string | undefined, sig: string, loc: string, insight: string | undefined, generationId?: string): void {
     this.db!.prepare(
-      'INSERT OR REPLACE INTO search_index (id, type, file, name, class, sig, loc, insight) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, 'method', file, name, className ?? null, sig, loc, insight ?? null);
+      'INSERT OR REPLACE INTO search_index (id, type, file, name, class, sig, loc, insight, generation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, 'method', file, name, className ?? null, sig, loc, insight ?? null, generationId ?? null);
     this.indexFts(id, 'method', file, name, className, sig, insight);
   }
 
-  indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined): void {
+  indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined, generationId?: string): void {
     this.db!.prepare(
-      'INSERT OR REPLACE INTO search_index (id, type, file, name, class, sig, loc, insight) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, 'class', file, name, name, null, loc, insight ?? null);
+      'INSERT OR REPLACE INTO search_index (id, type, file, name, class, sig, loc, insight, generation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, 'class', file, name, name, null, loc, insight ?? null, generationId ?? null);
     this.indexFts(id, 'class', file, name, name, undefined, insight);
+  }
+
+  getFileIndexGenerations(file: string): string[] {
+    const rows = this.db!.prepare(
+      'SELECT DISTINCT generation_id FROM search_index WHERE file = ? AND generation_id IS NOT NULL'
+    ).all(file) as Array<{ generation_id: string }>;
+    return rows.map(row => row.generation_id);
   }
 
   removeFileIndex(file: string): void {

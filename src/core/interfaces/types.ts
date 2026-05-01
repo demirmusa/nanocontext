@@ -3,6 +3,7 @@ export interface HeaderJson {
   file: string;
   lang: string;
   checksum: string;
+  generationId?: string;
   classes: ClassInfo[];
   methods: MethodInfo[];
   imports: string[];
@@ -42,6 +43,34 @@ export interface VectorRecord {
   insight?: string;
   lang?: string;
   text?: string; // for memory type
+  generationId?: string;
+}
+
+export interface ScanManifestFile {
+  file: string;
+  status: 'indexed' | 'changed' | 'skipped' | 'failed';
+  methods?: number;
+  error?: string;
+}
+
+export interface ScanManifest {
+  generationId: string;
+  startedAt: string;
+  finishedAt?: string;
+  status: 'running' | 'completed' | 'failed';
+  indexedFiles: number;
+  changedFiles: number;
+  skippedFiles: number;
+  failedFiles: number;
+  totalMethods: number;
+  parserVersion: string;
+  vectorSchemaVersion: string;
+  embeddingProvider: string;
+  embeddingModel: string;
+  embeddingDimensions: number;
+  insightPromptVersion: string;
+  files: ScanManifestFile[];
+  compactionCandidate?: boolean;
 }
 
 export interface SearchResult {
@@ -55,6 +84,7 @@ export interface SearchResult {
   refs?: string[];
   insight?: string;
   text?: string;
+  generationId?: string;
   score?: number;
   matchedBy?: Array<'name' | 'class' | 'signature' | 'file path' | 'memory' | 'refs' | 'insight'>;
   scoreParts?: {

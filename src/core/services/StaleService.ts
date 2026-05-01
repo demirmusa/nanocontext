@@ -5,6 +5,7 @@ import { IStateStore } from '../interfaces/IStateStore';
 import { IVectorStore } from '../interfaces/IVectorStore';
 import { computeChecksum } from '../../utils/checksum';
 import { resolveProjectPath } from '../../utils/projectPath';
+import { ScanManifestService } from './ScanManifestService';
 
 export interface StaleReport {
   ok: boolean;
@@ -19,6 +20,7 @@ export interface StaleReport {
     staleInsights: number;
     missingVectors: number;
     orphanVectors: number;
+    generationMismatches: number;
     vectorCount: number;
     totalMethods: number;
     lastScanAt: string | null;
@@ -63,6 +65,7 @@ export class StaleService {
     const config = await this.configManager.loadProjectConfig();
     const trackedFiles = this.stateStore.listTrackedFiles().sort((a, b) => a.localeCompare(b));
     const supportedExtensions = supportedExtensionsFor(config.languages);
+    const latestManifest = new ScanManifestService(this.configManager.getProjectRoot()).readLatest();
     let staleInsights = 0;
 
     for (const file of trackedFiles) {
@@ -132,6 +135,27 @@ export class StaleService {
       }
 
       const header = await this.headerStore.read(file);
+      if (header && latestManifest && header.generationId && header.generationId !== latestManifest.generationId) {
+        issues.push({
+          kind: 'scan-generation-mismatch',
+          category: 'generation',
+          severity: 'low',
+          file,
+          detail: `header generation ${header.generationId} differs from latest scan ${latestManifest.generationId}`,
+          action: 'nc scan',
+        });
+      }
+      const indexGenerations = this.stateStore.getFileIndexGenerations?.(file) ?? [];
+      if (latestManifest && indexGenerations.some(generation => generation !== latestManifest.generationId)) {
+        issues.push({
+          kind: 'scan-generation-mismatch',
+          category: 'generation',
+          severity: 'low',
+          file,
+          detail: `SQLite index generations ${indexGenerations.join(', ')} differ from latest scan ${latestManifest.generationId}`,
+          action: 'nc scan',
+        });
+      }
       if (config.aiInsight && header) {
         for (const method of header.methods) {
           if (!method.insight) {
@@ -217,6 +241,7 @@ export class StaleService {
         staleInsights,
         missingVectors,
         orphanVectors,
+        generationMismatches: issues.filter(issue => issue.kind === 'scan-generation-mismatch').length,
         vectorCount,
         totalMethods: stats.totalMethods,
         lastScanAt: stats.lastScanAt,

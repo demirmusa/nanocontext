@@ -3,8 +3,8 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import { IEmbeddingProvider } from '../interfaces/IEmbeddingProvider';
 
-const EMBEDDING_PROMPT_VERSION = 'vector-text-v1';
-const VECTOR_SCHEMA_VERSION = 'vector-schema-v1';
+export const EMBEDDING_PROMPT_VERSION = 'vector-text-v1';
+export const VECTOR_SCHEMA_VERSION = 'vector-schema-v1';
 
 export interface EmbeddingCacheStats {
   hits: number;

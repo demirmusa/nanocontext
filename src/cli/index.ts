@@ -21,6 +21,7 @@ import { traceCommand } from './commands/trace';
 import { clearCommand } from './commands/clear';
 import { impactCommand } from './commands/impact';
 import { staleCommand } from './commands/stale';
+import { scanManifestCommand } from './commands/scan-manifest';
 import { ignoreCommand } from './commands/ignore';
 import { removeCommand } from './commands/remove';
 import { agentStartCommand } from './commands/agent-start';
@@ -181,6 +182,12 @@ program
   .description('Check whether the index is stale')
   .option('--compact', 'Print compact agent-oriented output')
   .action(staleCommand);
+
+program
+  .command('scan-manifest')
+  .description('Show the latest scan generation manifest')
+  .option('--json', 'Print raw JSON manifest')
+  .action(scanManifestCommand);
 
 program
   .command('ignore <path>')

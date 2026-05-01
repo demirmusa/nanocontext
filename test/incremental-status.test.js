@@ -6,6 +6,7 @@ const path = require('node:path');
 const { SqliteStateStore } = require('../dist/core/storage/SqliteStateStore');
 const { SyncService } = require('../dist/core/pipeline/SyncService');
 const { StaleService } = require('../dist/core/services/StaleService');
+const { ScanManifestService } = require('../dist/core/services/ScanManifestService');
 const { createTempProject } = require('./helpers/project');
 
 const logger = {
@@ -196,4 +197,38 @@ test('stale service reports categorized index integrity issues with actions', as
   assert.ok(report.categories.vectors.some(issue => issue.kind === 'missing-vector'));
   assert.ok(report.categories.parser.some(issue => issue.kind === 'unsupported-extension'));
   assert.ok(report.categories.generation.some(issue => issue.kind === 'scan-generation-mismatch'));
+});
+
+test('scan manifest service stores latest generation and marks older generations compactable', async (t) => {
+  const projectRoot = createTempProject();
+  t.after(() => fs.rmSync(projectRoot, { recursive: true, force: true }));
+
+  const service = new ScanManifestService(projectRoot);
+  const first = service.create({
+    parserVersion: 'parser-v1',
+    vectorSchemaVersion: 'vector-v1',
+    embeddingProvider: 'none',
+    embeddingModel: 'disabled',
+    embeddingDimensions: 0,
+    insightPromptVersion: 'insight-v1',
+  });
+  first.status = 'completed';
+  first.finishedAt = new Date().toISOString();
+  first.indexedFiles = 1;
+  first.files.push({ file: 'src/a.ts', status: 'changed', methods: 1 });
+  service.save(first);
+
+  const second = service.create({
+    parserVersion: 'parser-v1',
+    vectorSchemaVersion: 'vector-v1',
+    embeddingProvider: 'none',
+    embeddingModel: 'disabled',
+    embeddingDimensions: 0,
+    insightPromptVersion: 'insight-v1',
+  });
+  service.save(second);
+
+  assert.equal(service.readLatest().generationId, second.generationId);
+  assert.equal(service.readPrevious()[0].generationId, first.generationId);
+  assert.equal(service.readPrevious()[0].compactionCandidate, true);
 });

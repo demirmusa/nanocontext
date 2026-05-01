@@ -14,6 +14,8 @@ import { HeaderJson, ScanProgress, VectorRecord, InsightGenerationResult } from 
 import { applyHeaderIdentity } from '../identity/recordIds';
 import { computeChecksum } from '../../utils/checksum';
 import { normalizeProjectPath } from '../../utils/projectPath';
+import { ScanManifestService, INSIGHT_PROMPT_VERSION, PARSER_VERSION } from '../services/ScanManifestService';
+import { VECTOR_SCHEMA_VERSION } from '../embedding/CachedEmbeddingProvider';
 
 export class StructurePipeline implements IStructurePipeline {
   constructor(
@@ -27,7 +29,7 @@ export class StructurePipeline implements IStructurePipeline {
     private logger: ILogger,
   ) {}
 
-  async processFile(filePath: string, content: string): Promise<HeaderJson> {
+  async processFile(filePath: string, content: string, generationId?: string): Promise<HeaderJson> {
     const parser = this.parserRegistry.getParser(filePath);
     if (!parser) {
       throw new Error(`No parser available for: ${filePath}`);
@@ -40,6 +42,7 @@ export class StructurePipeline implements IStructurePipeline {
       file: filePath,
       lang: parsed.lang,
       checksum,
+      generationId,
       classes: parsed.classes,
       methods: parsed.methods,
       imports: parsed.imports,
@@ -55,10 +58,10 @@ export class StructurePipeline implements IStructurePipeline {
     // Update search index
     this.stateStore.removeFileIndex(filePath);
     for (const method of header.methods) {
-      this.stateStore.indexMethod(method.id, filePath, method.name, method.class, method.sig, method.loc, method.insight);
+      this.stateStore.indexMethod(method.id, filePath, method.name, method.class, method.sig, method.loc, method.insight, generationId);
     }
     for (const cls of header.classes) {
-      this.stateStore.indexClass(cls.id, filePath, cls.name, cls.loc, cls.insight);
+      this.stateStore.indexClass(cls.id, filePath, cls.name, cls.loc, cls.insight, generationId);
     }
 
     return header;
@@ -66,7 +69,18 @@ export class StructurePipeline implements IStructurePipeline {
 
   async processProject(onProgress?: (progress: ScanProgress) => void): Promise<void> {
     const config = await this.configManager.loadProjectConfig();
+    const userConfig = await this.configManager.loadUserConfig();
     const projectRoot = this.configManager.getProjectRoot();
+    const manifestStore = new ScanManifestService(projectRoot);
+    const manifest = manifestStore.create({
+      parserVersion: PARSER_VERSION,
+      vectorSchemaVersion: VECTOR_SCHEMA_VERSION,
+      embeddingProvider: userConfig.embedding.provider,
+      embeddingModel: userConfig.embedding.model,
+      embeddingDimensions: this.embeddingProvider?.dimensions ?? 0,
+      insightPromptVersion: INSIGHT_PROMPT_VERSION,
+    });
+    manifestStore.save(manifest);
 
     // Read .nanocontextignore if it exists and merge with exclude patterns
     const ignorePatterns = [...config.exclude];
@@ -136,7 +150,11 @@ export class StructurePipeline implements IStructurePipeline {
           const existingHeader = await this.headerStore.read(file);
           if (existingHeader) {
             progress.totalMethods += existingHeader.methods.length;
+            manifest.totalMethods += existingHeader.methods.length;
           }
+          manifest.skippedFiles++;
+          manifest.indexedFiles++;
+          manifest.files.push({ file, status: 'skipped', methods: existingHeader?.methods.length ?? 0 });
           progress.processedFiles++;
           progress.skipped = true;
           onProgress?.(progress);
@@ -144,11 +162,21 @@ export class StructurePipeline implements IStructurePipeline {
         }
 
         progress.skipped = false;
-        const header = await this.processFile(file, content);
+        const header = await this.processFile(file, content, manifest.generationId);
         progress.totalMethods += header.methods.length;
+        manifest.totalMethods += header.methods.length;
+        manifest.changedFiles++;
+        manifest.indexedFiles++;
+        manifest.files.push({ file, status: 'changed', methods: header.methods.length });
         changedFiles.push(file);
       } catch (err) {
         progress.skipped = false;
+        manifest.failedFiles++;
+        manifest.files.push({
+          file,
+          status: 'failed',
+          error: err instanceof Error ? err.message : String(err),
+        });
         this.logger.error(`Failed to process ${file}:`, err);
       }
 
@@ -158,6 +186,7 @@ export class StructurePipeline implements IStructurePipeline {
 
     this.stateStore.setLastScanAt(new Date().toISOString());
     this.stateStore.setTotalMethods(progress.totalMethods);
+    manifestStore.save(manifest);
 
     // ── Phase 2: AI Insight (LLM keyword generation, file-based) ───
     if (config.aiInsight && this.llmProvider) {
@@ -272,7 +301,7 @@ export class StructurePipeline implements IStructurePipeline {
               try {
                 const header = await this.headerStore.read(file);
                 if (header) {
-                  await this.syncVectorsForFile(header);
+                  await this.syncVectorsForFile({ ...header, generationId: header.generationId ?? manifest.generationId });
                 }
               } catch (err) {
                 this.logger.error(`Vector phase failed for ${file}:`, err);
@@ -294,6 +323,10 @@ export class StructurePipeline implements IStructurePipeline {
         startNext();
       });
     }
+
+    manifest.finishedAt = new Date().toISOString();
+    manifest.status = manifest.failedFiles > 0 ? 'failed' : 'completed';
+    manifestStore.save(manifest);
   }
 
   async generateInsightsForFile(
@@ -329,7 +362,7 @@ export class StructurePipeline implements IStructurePipeline {
     if (updated) {
       await this.headerStore.write(filePath, normalizedHeader);
       for (const method of normalizedHeader.methods) {
-        this.stateStore.indexMethod(method.id, filePath, method.name, method.class, method.sig, method.loc, method.insight);
+        this.stateStore.indexMethod(method.id, filePath, method.name, method.class, method.sig, method.loc, method.insight, normalizedHeader.generationId);
       }
     }
 
@@ -400,6 +433,7 @@ export class StructurePipeline implements IStructurePipeline {
           refs: method.refs,
           insight: method.insight,
           lang: normalizedHeader.lang,
+          generationId: normalizedHeader.generationId,
         });
       } catch (err) {
         this.logger.error(`Failed to embed method ${method.name}:`, err);
@@ -430,6 +464,7 @@ export class StructurePipeline implements IStructurePipeline {
           loc: cls.loc,
           lang: normalizedHeader.lang,
           insight: cls.insight,
+          generationId: normalizedHeader.generationId,
         });
       } catch (err) {
         this.logger.error(`Failed to embed class ${cls.name}:`, err);

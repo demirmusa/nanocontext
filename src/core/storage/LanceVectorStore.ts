@@ -37,6 +37,7 @@ export class LanceVectorStore implements IVectorStore {
       insight: r.insight || '',
       lang: r.lang || '',
       text: r.text || '',
+      generation_id: r.generationId || '',
     }));
 
     if (!this.table) {
@@ -92,6 +93,7 @@ export class LanceVectorStore implements IVectorStore {
       refs: r.refs ? JSON.parse(r.refs as string) : undefined,
       insight: r.insight as string || undefined,
       text: r.text as string || undefined,
+      generationId: r.generation_id as string || undefined,
       score: r._distance as number || undefined,
     }));
 

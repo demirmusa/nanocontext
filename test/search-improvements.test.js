@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const { OpenAILLMProvider } = require('../dist/core/llm/providers/OpenAILLMProvider');
 const { SearchService } = require('../dist/core/services/SearchService');
+const { PrepareService, formatPrepareReport } = require('../dist/core/services/PrepareService');
 const { CodeReadService } = require('../dist/core/services/CodeReadService');
 const { MemoryService } = require('../dist/core/services/MemoryService');
 const { SearchFormatter } = require('../dist/core/search/SearchFormatter');
@@ -613,6 +614,59 @@ test('search service attaches symbol memory hints to matching results', async ()
 
   const [result] = await service.execute({ mode: 'exact', query: 'AuthService.BuildToken' });
   assert.equal(result.memoryHint, 'Symbol note');
+});
+
+test('prepare service builds compact task context with warnings memories and next commands', async () => {
+  const service = new PrepareService(
+    {
+      execute: async () => [
+        {
+          type: 'method',
+          file: 'src/auth.ts',
+          class: 'AuthService',
+          method: 'refreshToken',
+          loc: '10-20',
+          score: 4,
+          suggestedNext: 'nc get src/auth.ts[2-28]',
+        },
+      ],
+    },
+    {
+      inspect: async () => ({
+        ok: false,
+        stats: {},
+        categories: {},
+        issues: [{ kind: 'changed-file', severity: 'high', category: 'files', detail: 'changed', action: 'nc scan' }],
+        suggestedNext: ['nc scan'],
+      }),
+    },
+    {
+      analyze: async () => ({
+        query: 'AuthService#refreshToken',
+        callers: [{ symbol: 'Controller#refresh', path: 'src/controller.ts', range: '1-5', confidence: 'high', kind: 'caller' }],
+        callees: [],
+        trace: [],
+        sameFileSymbols: [],
+        possibleTests: [{ file: 'test/auth.test.ts', confidence: 'high', reason: 'matches file' }],
+        memories: [],
+        warnings: [],
+        suggestedNext: ['nc callers AuthService#refreshToken'],
+      }),
+    },
+    {
+      list: async () => [{ id: 'mem_1', text: 'Refresh token note', createdAt: '2026-01-01T00:00:00.000Z' }],
+    },
+  );
+
+  const report = await service.prepare('add refresh token support', 3);
+  const output = formatPrepareReport(report);
+
+  assert.match(output, /warnings: index has 1 issue/);
+  assert.match(output, /src\/auth.ts/);
+  assert.match(output, /AuthService#refreshToken/);
+  assert.match(output, /test\/auth.test.ts/);
+  assert.match(output, /Refresh token note/);
+  assert.match(output, /nc get src\/auth.ts/);
 });
 
 test('search service emits search telemetry through debug logging instead of info', async () => {

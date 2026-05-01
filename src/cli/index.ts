@@ -22,6 +22,7 @@ import { clearCommand } from './commands/clear';
 import { impactCommand } from './commands/impact';
 import { staleCommand } from './commands/stale';
 import { scanManifestCommand } from './commands/scan-manifest';
+import { prepareCommand } from './commands/prepare';
 import { ignoreCommand } from './commands/ignore';
 import { removeCommand } from './commands/remove';
 import { agentStartCommand } from './commands/agent-start';
@@ -85,6 +86,13 @@ program
   .command('agent-start')
   .description('Start background indexing and print project memories for agent session startup')
   .action(agentStartCommand);
+
+program
+  .command('prepare <task>')
+  .description('Build a compact agent context pack for a task')
+  .option('-l, --limit <number>', 'Max search results', '5')
+  .option('--json', 'Print raw JSON report')
+  .action(prepareCommand);
 
 program
   .command('stop')

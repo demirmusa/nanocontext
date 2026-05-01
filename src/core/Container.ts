@@ -28,6 +28,7 @@ import { AgentSetupService } from './services/AgentSetupService';
 import { ImpactService } from './services/ImpactService';
 import { StaleService } from './services/StaleService';
 import { GuardedEmbeddingProvider, GuardedLLMProvider } from './providers/ProviderGuard';
+import { PrepareService } from './services/PrepareService';
 import { Logger } from '../utils/Logger';
 import { IConfigManager } from './interfaces/IConfigManager';
 import { IStateStore } from './interfaces/IStateStore';
@@ -70,6 +71,7 @@ export class Container {
   private _agentSetupService: AgentSetupService | null = null;
   private _impactService: ImpactService | null = null;
   private _staleService: StaleService | null = null;
+  private _prepareService: PrepareService | null = null;
   private _logger: ILogger | null = null;
   private _defaultSearchLimit: number = 5;
   private _initialized = false;
@@ -339,6 +341,18 @@ export class Container {
     return this._staleService;
   }
 
+  get prepareService(): PrepareService {
+    if (!this._prepareService) {
+      this._prepareService = new PrepareService(
+        this.searchService,
+        this.staleService,
+        this.impactService,
+        this.memoryStore,
+      );
+    }
+    return this._prepareService;
+  }
+
   async initialize(): Promise<void> {
     if (this._initialized) return;
 
@@ -396,6 +410,7 @@ export class Container {
     this._watchService = null;
     this._impactService = null;
     this._staleService = null;
+    this._prepareService = null;
 
     this._initialized = true;
   }

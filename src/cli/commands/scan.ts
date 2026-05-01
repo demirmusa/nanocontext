@@ -155,6 +155,11 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
       }
       phaseSnapshot = { ...progress };
 
+      if (progress.skipReason) {
+        display.log(`[PHASE SKIP] ${progress.phase} — ${progress.skipReason}`);
+        return;
+      }
+
       // Track file (deduplicates internally)
       if (progress.currentFile) {
         display.trackFile(progress.currentFile, !!progress.skipped);
@@ -269,10 +274,10 @@ function phaseSummary(phase: string, p: ScanProgress, display: ScanDisplay, cfg:
       break;
     }
     case 'insight':
-      detail = `${p.totalFiles} files`;
+      detail = p.skipReason ? `skipped: ${p.skipReason}` : `${p.totalFiles} files`;
       break;
     case 'vectors':
-      detail = `${p.totalFiles} files`;
+      detail = p.skipReason ? `skipped: ${p.skipReason}` : `${p.totalFiles} files`;
       break;
     default:
       detail = `${p.totalFiles} files`;

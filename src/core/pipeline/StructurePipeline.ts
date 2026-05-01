@@ -251,6 +251,8 @@ export class StructurePipeline implements IStructurePipeline {
           progress.phase = 'insight';
           progress.processedFiles = 0;
           progress.totalFiles = fileTasks.length;
+          progress.currentFile = undefined;
+          progress.skipReason = undefined;
           onProgress?.(progress);
 
           const concurrency = config.aiInsightConcurrency || 20;
@@ -302,10 +304,30 @@ export class StructurePipeline implements IStructurePipeline {
             };
             startNext();
           });
+        } else {
+          progress.phase = 'insight';
+          progress.processedFiles = 0;
+          progress.totalFiles = 0;
+          progress.currentFile = undefined;
+          progress.skipReason = 'no methods need insight';
+          onProgress?.(progress);
         }
       } else {
         this.logger.warn('LLM provider not available, skipping insight phase');
+        progress.phase = 'insight';
+        progress.processedFiles = 0;
+        progress.totalFiles = 0;
+        progress.currentFile = undefined;
+        progress.skipReason = 'LLM provider unavailable';
+        onProgress?.(progress);
       }
+    } else if (config.aiInsight && !this.llmProvider) {
+      progress.phase = 'insight';
+      progress.processedFiles = 0;
+      progress.totalFiles = 0;
+      progress.currentFile = undefined;
+      progress.skipReason = 'LLM provider not configured';
+      onProgress?.(progress);
     }
 
     // ── Phase 3: Vector embeddings ──────────────────────────────────
@@ -318,6 +340,7 @@ export class StructurePipeline implements IStructurePipeline {
         progress.processedFiles = 0;
         progress.totalFiles = vectorFiles.length;
         progress.currentFile = undefined;
+        progress.skipReason = undefined;
         onProgress?.(progress);
 
         const concurrency = config.aiInsightConcurrency || 20;
@@ -356,7 +379,23 @@ export class StructurePipeline implements IStructurePipeline {
           };
           startNext();
         });
+      } else {
+        progress.phase = 'vectors';
+        progress.processedFiles = 0;
+        progress.totalFiles = 0;
+        progress.currentFile = undefined;
+        progress.skipReason = vectorCount === 0
+          ? 'no files with vectors'
+          : 'no changed files or insight updates';
+        onProgress?.(progress);
       }
+    } else {
+      progress.phase = 'vectors';
+      progress.processedFiles = 0;
+      progress.totalFiles = 0;
+      progress.currentFile = undefined;
+      progress.skipReason = 'embedding provider not configured';
+      onProgress?.(progress);
     }
 
     manifest.finishedAt = new Date().toISOString();

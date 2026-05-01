@@ -303,6 +303,7 @@ export interface ScanProgress {
   totalMethods: number;
   currentFile?: string;
   skipped?: boolean;
+  skipReason?: string;
   insightResult?: InsightGenerationResult;
 }
 

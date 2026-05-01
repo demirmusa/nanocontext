@@ -179,11 +179,16 @@ test('scan skips vector phase when files are unchanged and vectors already exist
     logger,
   );
 
-  const phases = [];
-  await pipeline.processProject(progress => phases.push(progress.phase));
+  const progressEvents = [];
+  await pipeline.processProject(progress => progressEvents.push({ ...progress }));
 
   assert.equal(vectorSyncs, 0);
-  assert.ok(!phases.includes('vectors'));
+  assert.deepEqual(
+    progressEvents
+      .filter(progress => progress.phase === 'vectors')
+      .map(progress => progress.skipReason),
+    ['no changed files or insight updates'],
+  );
 });
 
 test('scan rebuilds vectors from unchanged headers when vector store is empty', async (t) => {
@@ -249,6 +254,68 @@ test('scan rebuilds vectors from unchanged headers when vector store is empty', 
   assert.equal(upserts, 1);
 });
 
+test('scan reports skipped insight phase when no methods need insight', async (t) => {
+  const source = 'export function run() { return 1; }\n';
+  const projectRoot = createTempProject({
+    'src/example.ts': source,
+  });
+  t.after(() => fs.rmSync(projectRoot, { recursive: true, force: true }));
+
+  const existingHeader = {
+    file: 'src/example.ts',
+    lang: 'typescript',
+    checksum: computeChecksum(source),
+    classes: [],
+    methods: [
+      { id: 'method:run', name: 'run', loc: '1-1', sig: 'export function run()', refs: [], insight: 'runs example code' },
+    ],
+    imports: [],
+    exports: ['run'],
+  };
+
+  const pipeline = new StructurePipeline(
+    parserRegistryForExample(),
+    {
+      getHeaderPath: () => '',
+      read: async () => existingHeader,
+      write: async () => {},
+      remove: async () => {},
+      exists: () => true,
+    },
+    stateStoreForExample(source),
+    {
+      initialize: async () => {},
+      upsert: async () => {},
+      remove: async () => {},
+      removeByFile: async () => {},
+      search: async () => [],
+      clear: async () => {},
+      count: async () => 1,
+    },
+    null,
+    {
+      name: 'fake-llm',
+      isAvailable: async () => true,
+      generateFileInsights: async () => {
+        throw new Error('insight should not run');
+      },
+      selectRelevantSearchResults: async () => ({ selectedIds: [], rawResponse: '' }),
+    },
+    configManagerForExample(projectRoot, { aiInsight: true }),
+    logger,
+  );
+
+  const progressEvents = [];
+  await pipeline.processProject(progress => progressEvents.push({ ...progress }));
+
+  assert.deepEqual(
+    progressEvents
+      .filter(progress => progress.phase === 'insight')
+      .map(progress => progress.skipReason),
+    ['no methods need insight'],
+  );
+});
+
 function parserRegistryForExample() {
   return {
     register() {},
@@ -300,7 +367,7 @@ function stateStoreForExample(source) {
   };
 }
 
-function configManagerForExample(projectRoot) {
+function configManagerForExample(projectRoot, overrides = {}) {
   const projectConfig = {
     version: 1,
     languages: ['typescript'],
@@ -311,6 +378,7 @@ function configManagerForExample(projectRoot) {
     watch: { debounceMs: 100 },
     search: { defaultLimit: 3, maxLimit: 20 },
     dependencyDepth: 1,
+    ...overrides,
   };
   const userConfig = {
     llm: { provider: 'none', model: 'disabled' },

@@ -229,11 +229,18 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
     if (cacheStats) {
       console.log(colors.dim(`  Embedding cache: ${cacheStats.hits} hits, ${cacheStats.misses} misses, ${cacheStats.writes} writes, ${cacheStats.errors} errors`));
     }
+    const providerStats = container.indexService.getEmbeddingProviderGuardStats();
+    if (providerStats && (providerStats.retries > 0 || providerStats.failures > 0 || providerStats.timeouts > 0 || providerStats.rateLimits > 0)) {
+      console.log(colors.dim(`  Provider guard: ${providerStats.retries} retries, ${providerStats.failures} failures, ${providerStats.rateLimits} rate limits, ${providerStats.timeouts} timeouts`));
+    }
 
     if (verbose) {
       display.log(`[SUMMARY] files=${stats.totalFiles} methods=${stats.totalMethods} insightOK=${insightSuccessCount} insightErrors=${insightErrorCount}`);
       if (cacheStats) {
         display.log(`[EMBEDDING CACHE] hits=${cacheStats.hits} misses=${cacheStats.misses} writes=${cacheStats.writes} errors=${cacheStats.errors}`);
+      }
+      if (providerStats) {
+        display.log(`[PROVIDER GUARD] attempts=${providerStats.attempts} retries=${providerStats.retries} failures=${providerStats.failures} rateLimits=${providerStats.rateLimits} timeouts=${providerStats.timeouts} nonRetryable=${providerStats.nonRetryableFailures}`);
       }
       display.finalize();
       console.log(colors.dim(`  Insight: ${insightSuccessCount} OK, ${insightErrorCount} errors`));

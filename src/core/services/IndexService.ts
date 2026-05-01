@@ -7,6 +7,7 @@ import { IVectorStore } from '../interfaces/IVectorStore';
 import { ScanProgress, SyncResult } from '../interfaces/types';
 import { normalizeProjectPath } from '../../utils/projectPath';
 import { EmbeddingCacheStats } from '../embedding/CachedEmbeddingProvider';
+import { ProviderGuardStats } from '../providers/ProviderGuard';
 
 export interface IndexRuntimeConfigSummary {
   aiInsight: boolean;
@@ -54,6 +55,11 @@ export class IndexService {
   getEmbeddingCacheStats(): EmbeddingCacheStats | null {
     const provider = this.embeddingProvider as (IEmbeddingProvider & { getCacheStats?: () => EmbeddingCacheStats }) | null;
     return provider?.getCacheStats?.() ?? null;
+  }
+
+  getEmbeddingProviderGuardStats(): ProviderGuardStats | null {
+    const provider = this.embeddingProvider as (IEmbeddingProvider & { getProviderGuardStats?: () => ProviderGuardStats | null }) | null;
+    return provider?.getProviderGuardStats?.() ?? null;
   }
 
   scanFiles(files: string[]): Promise<SyncResult[]> {

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { IEmbeddingProvider } from '../interfaces/IEmbeddingProvider';
+import { ProviderGuardStats } from '../providers/ProviderGuard';
 
 export const EMBEDDING_PROMPT_VERSION = 'vector-text-v1';
 export const VECTOR_SCHEMA_VERSION = 'vector-schema-v1';
@@ -68,6 +69,11 @@ export class CachedEmbeddingProvider implements IEmbeddingProvider {
 
   getCacheStats(): EmbeddingCacheStats {
     return { ...this.stats };
+  }
+
+  getProviderGuardStats(): ProviderGuardStats | null {
+    const provider = this.inner as IEmbeddingProvider & { getProviderGuardStats?: () => ProviderGuardStats };
+    return provider.getProviderGuardStats?.() ?? null;
   }
 
   private buildKey(text: string): string {

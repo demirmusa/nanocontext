@@ -27,6 +27,7 @@ import { WatchService } from './services/WatchService';
 import { AgentSetupService } from './services/AgentSetupService';
 import { ImpactService } from './services/ImpactService';
 import { StaleService } from './services/StaleService';
+import { GuardedEmbeddingProvider, GuardedLLMProvider } from './providers/ProviderGuard';
 import { Logger } from '../utils/Logger';
 import { IConfigManager } from './interfaces/IConfigManager';
 import { IStateStore } from './interfaces/IStateStore';
@@ -353,7 +354,7 @@ export class Container {
     if (userConfig.llm.provider !== 'none') {
       try {
         const llmFactory = new LLMProviderFactory();
-        this._llmProvider = llmFactory.create(userConfig.llm);
+        this._llmProvider = new GuardedLLMProvider(llmFactory.create(userConfig.llm));
       } catch (err) {
         this.logger.warn('LLM provider not configured:', err);
       }
@@ -363,8 +364,9 @@ export class Container {
     if (userConfig.embedding.provider !== 'none') {
       try {
         const embeddingFactory = new EmbeddingProviderFactory();
+        const guardedProvider = new GuardedEmbeddingProvider(embeddingFactory.create(userConfig.embedding));
         this._embeddingProvider = new CachedEmbeddingProvider(
-          embeddingFactory.create(userConfig.embedding),
+          guardedProvider,
           this.configManager.getProjectRoot(),
           userConfig.embedding.model,
         );

@@ -10,7 +10,7 @@ import { IEmbeddingProvider } from '../interfaces/IEmbeddingProvider';
 import { ILLMProvider } from '../interfaces/ILLMProvider';
 import { IConfigManager } from '../interfaces/IConfigManager';
 import { ILogger } from '../interfaces/ILogger';
-import { HeaderJson, ScanProgress, VectorRecord, InsightGenerationResult } from '../interfaces/types';
+import { HeaderJson, ScanProgress, VectorRecord, InsightGenerationResult, MethodInfo } from '../interfaces/types';
 import { applyHeaderIdentity } from '../identity/recordIds';
 import { computeChecksum } from '../../utils/checksum';
 import { normalizeProjectPath } from '../../utils/projectPath';
@@ -43,6 +43,7 @@ export class StructurePipeline implements IStructurePipeline {
       lang: parsed.lang,
       checksum,
       generationId,
+      namespace: inferNamespace(parsed.exports),
       classes: parsed.classes,
       methods: parsed.methods,
       imports: parsed.imports,
@@ -58,10 +59,30 @@ export class StructurePipeline implements IStructurePipeline {
     // Update search index
     this.stateStore.removeFileIndex(filePath);
     for (const method of header.methods) {
-      this.stateStore.indexMethod(method.id, filePath, method.name, method.class, method.sig, method.loc, method.insight, generationId);
+      applyMethodMetadata(method, header.namespace);
+      this.stateStore.indexMethod(method.id, filePath, method.name, method.class, method.sig, method.loc, method.insight, generationId, {
+        namespace: method.namespace,
+        imports: header.imports,
+        exports: header.exports,
+        decorators: method.decorators,
+        visibility: method.visibility,
+        isAsync: method.isAsync,
+        isStatic: method.isStatic,
+        parameters: method.parameters,
+        returnType: method.returnType,
+      });
     }
     for (const cls of header.classes) {
-      this.stateStore.indexClass(cls.id, filePath, cls.name, cls.loc, cls.insight, generationId);
+      cls.namespace = cls.namespace ?? header.namespace;
+      this.stateStore.indexClass(cls.id, filePath, cls.name, cls.loc, cls.insight, generationId, {
+        namespace: cls.namespace,
+        imports: header.imports,
+        exports: header.exports,
+        decorators: cls.decorators,
+        visibility: cls.visibility,
+        extends: cls.extends,
+        implements: cls.implements,
+      });
     }
 
     return header;
@@ -362,7 +383,18 @@ export class StructurePipeline implements IStructurePipeline {
     if (updated) {
       await this.headerStore.write(filePath, normalizedHeader);
       for (const method of normalizedHeader.methods) {
-        this.stateStore.indexMethod(method.id, filePath, method.name, method.class, method.sig, method.loc, method.insight, normalizedHeader.generationId);
+        applyMethodMetadata(method, normalizedHeader.namespace);
+        this.stateStore.indexMethod(method.id, filePath, method.name, method.class, method.sig, method.loc, method.insight, normalizedHeader.generationId, {
+          namespace: method.namespace,
+          imports: normalizedHeader.imports,
+          exports: normalizedHeader.exports,
+          decorators: method.decorators,
+          visibility: method.visibility,
+          isAsync: method.isAsync,
+          isStatic: method.isStatic,
+          parameters: method.parameters,
+          returnType: method.returnType,
+        });
       }
     }
 
@@ -499,4 +531,43 @@ export class StructurePipeline implements IStructurePipeline {
 
     return methods;
   }
+}
+
+function inferNamespace(exports: string[]): string | undefined {
+  return exports.find(item => item.includes('.') && /^[A-Z_][\w.]+$/.test(item));
+}
+
+function applyMethodMetadata(method: MethodInfo, namespace: string | undefined): void {
+  method.namespace = method.namespace ?? namespace;
+  const sig = method.sig ?? '';
+  method.isAsync = method.isAsync ?? /\basync\b|Promise<|Task<|ValueTask</i.test(sig);
+  method.isStatic = method.isStatic ?? /\bstatic\b/i.test(sig);
+  method.visibility = method.visibility ?? inferVisibility(sig);
+  method.parameters = method.parameters ?? inferParameters(sig);
+  method.returnType = method.returnType ?? inferReturnType(sig, method.name);
+}
+
+function inferVisibility(sig: string): string | undefined {
+  const match = sig.match(/\b(public|private|protected|internal|export)\b/i);
+  return match?.[1].toLowerCase();
+}
+
+function inferParameters(sig: string): string[] | undefined {
+  const match = sig.match(/\(([^)]*)\)/);
+  if (!match || !match[1].trim()) {
+    return undefined;
+  }
+  return match[1].split(',').map(param => param.trim()).filter(Boolean);
+}
+
+function inferReturnType(sig: string, name: string): string | undefined {
+  const tsMatch = sig.match(/\)\s*:\s*([^={;]+)/);
+  if (tsMatch) {
+    return tsMatch[1].trim();
+  }
+
+  const beforeName = sig.slice(0, sig.indexOf(name)).trim();
+  const tokens = beforeName.split(/\s+/).filter(Boolean)
+    .filter(token => !['public', 'private', 'protected', 'internal', 'static', 'async', 'export'].includes(token.toLowerCase()));
+  return tokens.length > 0 ? tokens[tokens.length - 1] : undefined;
 }

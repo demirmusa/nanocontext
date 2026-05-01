@@ -1,4 +1,4 @@
-import { InsightQueueItem, SearchResult } from './types';
+import { InsightQueueItem, SearchResult, SymbolIndexMetadata } from './types';
 
 export interface IStateStore {
   initialize(): Promise<void>;
@@ -16,8 +16,8 @@ export interface IStateStore {
   isInsightPending(file: string): boolean;
 
   // Search index
-  indexMethod(id: string, file: string, name: string, className: string | undefined, sig: string, loc: string, insight: string | undefined, generationId?: string): void;
-  indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined, generationId?: string): void;
+  indexMethod(id: string, file: string, name: string, className: string | undefined, sig: string, loc: string, insight: string | undefined, generationId?: string, metadata?: SymbolIndexMetadata): void;
+  indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined, generationId?: string, metadata?: SymbolIndexMetadata): void;
   getFileIndexGenerations?(file: string): string[];
   removeFileIndex(file: string): void;
   searchExact(query: string, limit?: number): SearchResult[];

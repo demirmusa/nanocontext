@@ -36,6 +36,37 @@ test('state stats derive method totals from the live search index', async (t) =>
   stateStore.close();
 });
 
+test('state search index preserves precise symbol metadata', async (t) => {
+  const projectRoot = createTempProject();
+  t.after(() => fs.rmSync(projectRoot, { recursive: true, force: true }));
+
+  const stateStore = new SqliteStateStore(projectRoot);
+  await stateStore.initialize();
+
+  stateStore.indexMethod('method:1', 'src/example.ts', 'run', 'Worker', 'public async run(id: string): Promise<void>', '1-2', undefined, 'gen_1', {
+    namespace: 'Demo.App',
+    imports: ['import { x } from "./x"'],
+    exports: ['run'],
+    decorators: ['@trace'],
+    visibility: 'public',
+    isAsync: true,
+    isStatic: false,
+    parameters: ['id: string'],
+    returnType: 'Promise<void>',
+  });
+
+  const [result] = stateStore.searchExact('run', 1);
+  assert.equal(result.namespace, 'Demo.App');
+  assert.deepEqual(result.decorators, ['@trace']);
+  assert.equal(result.visibility, 'public');
+  assert.equal(result.isAsync, true);
+  assert.deepEqual(result.parameters, ['id: string']);
+  assert.equal(result.returnType, 'Promise<void>');
+  assert.deepEqual(result.imports, ['import { x } from "./x"']);
+  assert.deepEqual(result.exports, ['run']);
+  stateStore.close();
+});
+
 test('sync service updates last scan time for unchanged incremental syncs', async (t) => {
   const projectRoot = createTempProject({
     'src/example.ts': 'export function run() { return 1; }\n',

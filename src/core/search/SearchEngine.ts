@@ -120,6 +120,15 @@ export class SearchEngine implements ISearchEngine {
                   refs: method.refs,
                   insight: method.insight,
                   class: method.class,
+                  namespace: method.namespace ?? header.namespace,
+                  decorators: method.decorators,
+                  visibility: method.visibility,
+                  isAsync: method.isAsync,
+                  isStatic: method.isStatic,
+                  parameters: method.parameters,
+                  returnType: method.returnType,
+                  imports: header.imports,
+                  exports: header.exports,
                 });
                 continue;
               }
@@ -132,6 +141,13 @@ export class SearchEngine implements ISearchEngine {
                   id: cls.id,
                   loc: cls.loc,
                   insight: cls.insight,
+                  namespace: cls.namespace ?? header.namespace,
+                  decorators: cls.decorators,
+                  visibility: cls.visibility,
+                  extends: cls.extends,
+                  implements: cls.implements,
+                  imports: header.imports,
+                  exports: header.exports,
                 });
                 continue;
               }

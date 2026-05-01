@@ -4,6 +4,7 @@ export interface HeaderJson {
   lang: string;
   checksum: string;
   generationId?: string;
+  namespace?: string;
   classes: ClassInfo[];
   methods: MethodInfo[];
   imports: string[];
@@ -14,8 +15,11 @@ export interface ClassInfo {
   id: string;
   name: string;
   loc: string; // "80-150"
+  namespace?: string;
   extends?: string;
   implements?: string[];
+  decorators?: string[];
+  visibility?: string;
   insight?: string;
 }
 
@@ -27,7 +31,27 @@ export interface MethodInfo {
   sig: string;
   refs: string[];
   decorators?: string[];
+  namespace?: string;
+  visibility?: string;
+  isAsync?: boolean;
+  isStatic?: boolean;
+  parameters?: string[];
+  returnType?: string;
   insight?: string;
+}
+
+export interface SymbolIndexMetadata {
+  namespace?: string;
+  imports?: string[];
+  exports?: string[];
+  decorators?: string[];
+  visibility?: string;
+  isAsync?: boolean;
+  isStatic?: boolean;
+  parameters?: string[];
+  returnType?: string;
+  extends?: string;
+  implements?: string[];
 }
 
 export interface VectorRecord {
@@ -85,6 +109,17 @@ export interface SearchResult {
   insight?: string;
   text?: string;
   generationId?: string;
+  namespace?: string;
+  decorators?: string[];
+  visibility?: string;
+  isAsync?: boolean;
+  isStatic?: boolean;
+  parameters?: string[];
+  returnType?: string;
+  extends?: string;
+  implements?: string[];
+  imports?: string[];
+  exports?: string[];
   score?: number;
   matchedBy?: Array<'name' | 'class' | 'signature' | 'file path' | 'memory' | 'refs' | 'insight'>;
   scoreParts?: {

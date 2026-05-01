@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import * as path from 'path';
 import * as fs from 'fs';
 import { IStateStore } from '../interfaces/IStateStore';
-import { InsightQueueItem, SearchResult } from '../interfaces/types';
+import { InsightQueueItem, SearchResult, SymbolIndexMetadata } from '../interfaces/types';
 
 export class SqliteStateStore implements IStateStore {
   private db: Database.Database | null = null;
@@ -57,7 +57,18 @@ export class SqliteStateStore implements IStateStore {
         sig TEXT,
         loc TEXT,
         insight TEXT,
-        generation_id TEXT
+        generation_id TEXT,
+        namespace TEXT,
+        decorators TEXT,
+        visibility TEXT,
+        is_async INTEGER,
+        is_static INTEGER,
+        parameters TEXT,
+        return_type TEXT,
+        extends_name TEXT,
+        implements TEXT,
+        imports TEXT,
+        exports TEXT
       );
 
       CREATE VIRTUAL TABLE IF NOT EXISTS search_index_fts USING fts5(
@@ -72,7 +83,7 @@ export class SqliteStateStore implements IStateStore {
     `);
 
     this.migrateInsightQueue();
-    this.migrateSearchIndexGeneration();
+    this.migrateSearchIndexColumns();
     this.rebuildSearchFts();
   }
 
@@ -123,11 +134,27 @@ export class SqliteStateStore implements IStateStore {
     this.db!.prepare('DELETE FROM search_index_fts WHERE file = ?').run(filePath);
   }
 
-  private migrateSearchIndexGeneration(): void {
+  private migrateSearchIndexColumns(): void {
     const columns = this.db!.prepare("PRAGMA table_info('search_index')").all() as Array<{ name: string }>;
-    const hasGenerationId = columns.some(column => column.name === 'generation_id');
-    if (!hasGenerationId) {
-      this.db!.exec('ALTER TABLE search_index ADD COLUMN generation_id TEXT');
+    const existing = new Set(columns.map(column => column.name));
+    const additions: Record<string, string> = {
+      generation_id: 'TEXT',
+      namespace: 'TEXT',
+      decorators: 'TEXT',
+      visibility: 'TEXT',
+      is_async: 'INTEGER',
+      is_static: 'INTEGER',
+      parameters: 'TEXT',
+      return_type: 'TEXT',
+      extends_name: 'TEXT',
+      implements: 'TEXT',
+      imports: 'TEXT',
+      exports: 'TEXT',
+    };
+    for (const [name, type] of Object.entries(additions)) {
+      if (!existing.has(name)) {
+        this.db!.exec(`ALTER TABLE search_index ADD COLUMN ${name} ${type}`);
+      }
     }
   }
 
@@ -179,17 +206,49 @@ export class SqliteStateStore implements IStateStore {
     return row.count > 0;
   }
 
-  indexMethod(id: string, file: string, name: string, className: string | undefined, sig: string, loc: string, insight: string | undefined, generationId?: string): void {
+  indexMethod(id: string, file: string, name: string, className: string | undefined, sig: string, loc: string, insight: string | undefined, generationId?: string, metadata?: SymbolIndexMetadata): void {
     this.db!.prepare(
-      'INSERT OR REPLACE INTO search_index (id, type, file, name, class, sig, loc, insight, generation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, 'method', file, name, className ?? null, sig, loc, insight ?? null, generationId ?? null);
+      `INSERT OR REPLACE INTO search_index (
+        id, type, file, name, class, sig, loc, insight, generation_id, namespace, decorators,
+        visibility, is_async, is_static, parameters, return_type, extends_name, implements, imports, exports
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id, 'method', file, name, className ?? null, sig, loc, insight ?? null, generationId ?? null,
+      metadata?.namespace ?? null,
+      stringifyJson(metadata?.decorators),
+      metadata?.visibility ?? null,
+      metadata?.isAsync === undefined ? null : Number(metadata.isAsync),
+      metadata?.isStatic === undefined ? null : Number(metadata.isStatic),
+      stringifyJson(metadata?.parameters),
+      metadata?.returnType ?? null,
+      metadata?.extends ?? null,
+      stringifyJson(metadata?.implements),
+      stringifyJson(metadata?.imports),
+      stringifyJson(metadata?.exports),
+    );
     this.indexFts(id, 'method', file, name, className, sig, insight);
   }
 
-  indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined, generationId?: string): void {
+  indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined, generationId?: string, metadata?: SymbolIndexMetadata): void {
     this.db!.prepare(
-      'INSERT OR REPLACE INTO search_index (id, type, file, name, class, sig, loc, insight, generation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, 'class', file, name, name, null, loc, insight ?? null, generationId ?? null);
+      `INSERT OR REPLACE INTO search_index (
+        id, type, file, name, class, sig, loc, insight, generation_id, namespace, decorators,
+        visibility, is_async, is_static, parameters, return_type, extends_name, implements, imports, exports
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id, 'class', file, name, name, null, loc, insight ?? null, generationId ?? null,
+      metadata?.namespace ?? null,
+      stringifyJson(metadata?.decorators),
+      metadata?.visibility ?? null,
+      null,
+      null,
+      null,
+      null,
+      metadata?.extends ?? null,
+      stringifyJson(metadata?.implements),
+      stringifyJson(metadata?.imports),
+      stringifyJson(metadata?.exports),
+    );
     this.indexFts(id, 'class', file, name, name, undefined, insight);
   }
 
@@ -208,24 +267,12 @@ export class SqliteStateStore implements IStateStore {
   searchExact(query: string, limit: number = 20): SearchResult[] {
     const pattern = `%${query}%`;
     const rows = this.db!.prepare(
-      `SELECT id, type, file, name, class, sig, loc, insight FROM search_index
+      `SELECT ${searchIndexSelectColumns()} FROM search_index
        WHERE name LIKE ? OR sig LIKE ? OR class LIKE ? OR file LIKE ?
        LIMIT ?`
-    ).all(pattern, pattern, pattern, pattern, limit) as Array<{
-      id: string; type: string; file: string; name: string; class: string | null;
-      sig: string | null; loc: string | null; insight: string | null;
-    }>;
+    ).all(pattern, pattern, pattern, pattern, limit) as SearchIndexRow[];
 
-    return rows.map(r => ({
-      id: r.id,
-      type: r.type as 'method' | 'class',
-      file: r.file,
-      method: r.type === 'method' ? r.name : undefined,
-      class: r.class ?? undefined,
-      sig: r.sig ?? undefined,
-      loc: r.loc ?? undefined,
-      insight: r.insight ?? undefined,
-    }));
+    return rows.map(mapSearchIndexRow);
   }
 
   searchLexical(query: string, limit: number = 20): SearchResult[] {
@@ -236,27 +283,17 @@ export class SqliteStateStore implements IStateStore {
 
     try {
       const rows = this.db!.prepare(
-        `SELECT si.id, si.type, si.file, si.name, si.class, si.sig, si.loc, si.insight,
+        `SELECT ${searchIndexSelectColumns('si')},
                 bm25(search_index_fts, 1.5, 3.0, 2.0, 1.2, 1.0) AS rank
          FROM search_index_fts
          JOIN search_index si ON si.id = search_index_fts.id
          WHERE search_index_fts MATCH ?
          ORDER BY rank ASC
          LIMIT ?`
-      ).all(ftsQuery, limit) as Array<{
-        id: string; type: string; file: string; name: string; class: string | null;
-        sig: string | null; loc: string | null; insight: string | null; rank: number;
-      }>;
+      ).all(ftsQuery, limit) as Array<SearchIndexRow & { rank: number }>;
 
       return rows.map(r => ({
-        id: r.id,
-        type: r.type as 'method' | 'class',
-        file: r.file,
-        method: r.type === 'method' ? r.name : undefined,
-        class: r.class ?? undefined,
-        sig: r.sig ?? undefined,
-        loc: r.loc ?? undefined,
-        insight: r.insight ?? undefined,
+        ...mapSearchIndexRow(r),
         score: normalizeFtsRank(r.rank),
       }));
     } catch {
@@ -266,24 +303,12 @@ export class SqliteStateStore implements IStateStore {
 
   searchRegex(pattern: string, limit: number = 20): SearchResult[] {
     const rows = this.db!.prepare(
-      `SELECT id, type, file, name, class, sig, loc, insight FROM search_index
+      `SELECT ${searchIndexSelectColumns()} FROM search_index
        WHERE name REGEXP ? OR sig REGEXP ? OR class REGEXP ? OR file REGEXP ?
        LIMIT ?`
-    ).all(pattern, pattern, pattern, pattern, limit) as Array<{
-      id: string; type: string; file: string; name: string; class: string | null;
-      sig: string | null; loc: string | null; insight: string | null;
-    }>;
+    ).all(pattern, pattern, pattern, pattern, limit) as SearchIndexRow[];
 
-    return rows.map(r => ({
-      id: r.id,
-      type: r.type as 'method' | 'class',
-      file: r.file,
-      method: r.type === 'method' ? r.name : undefined,
-      class: r.class ?? undefined,
-      sig: r.sig ?? undefined,
-      loc: r.loc ?? undefined,
-      insight: r.insight ?? undefined,
-    }));
+    return rows.map(mapSearchIndexRow);
   }
 
   getStats(): { totalFiles: number; totalMethods: number; lastScanAt: string | null } {
@@ -363,4 +388,75 @@ function normalizeFtsRank(rank: number): number {
     return 0;
   }
   return 1 / (1 + Math.max(0, Math.abs(rank)));
+}
+
+interface SearchIndexRow {
+  id: string;
+  type: string;
+  file: string;
+  name: string;
+  class: string | null;
+  sig: string | null;
+  loc: string | null;
+  insight: string | null;
+  generation_id: string | null;
+  namespace: string | null;
+  decorators: string | null;
+  visibility: string | null;
+  is_async: number | null;
+  is_static: number | null;
+  parameters: string | null;
+  return_type: string | null;
+  extends_name: string | null;
+  implements: string | null;
+  imports: string | null;
+  exports: string | null;
+}
+
+function searchIndexSelectColumns(alias?: string): string {
+  const prefix = alias ? `${alias}.` : '';
+  return [
+    'id', 'type', 'file', 'name', 'class', 'sig', 'loc', 'insight', 'generation_id',
+    'namespace', 'decorators', 'visibility', 'is_async', 'is_static', 'parameters',
+    'return_type', 'extends_name', 'implements', 'imports', 'exports',
+  ].map(column => `${prefix}${column}`).join(', ');
+}
+
+function mapSearchIndexRow(row: SearchIndexRow): SearchResult {
+  return {
+    id: row.id,
+    type: row.type as 'method' | 'class',
+    file: row.file,
+    method: row.type === 'method' ? row.name : undefined,
+    class: row.class ?? undefined,
+    sig: row.sig ?? undefined,
+    loc: row.loc ?? undefined,
+    insight: row.insight ?? undefined,
+    generationId: row.generation_id ?? undefined,
+    namespace: row.namespace ?? undefined,
+    decorators: parseJsonArray(row.decorators),
+    visibility: row.visibility ?? undefined,
+    isAsync: row.is_async === null ? undefined : Boolean(row.is_async),
+    isStatic: row.is_static === null ? undefined : Boolean(row.is_static),
+    parameters: parseJsonArray(row.parameters),
+    returnType: row.return_type ?? undefined,
+    extends: row.extends_name ?? undefined,
+    implements: parseJsonArray(row.implements),
+    imports: parseJsonArray(row.imports),
+    exports: parseJsonArray(row.exports),
+  };
+}
+
+function stringifyJson(value: unknown[] | undefined): string | null {
+  return value && value.length > 0 ? JSON.stringify(value) : null;
+}
+
+function parseJsonArray(value: string | null): string[] | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : undefined;
+  } catch {
+    return undefined;
+  }
 }

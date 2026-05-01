@@ -360,7 +360,11 @@ export class StructurePipeline implements IStructurePipeline {
                 try {
                   const header = await this.headerStore.read(file);
                   if (header) {
-                    await this.syncVectorsForFile({ ...header, generationId: header.generationId ?? manifest.generationId });
+                    const resolved = { ...header, generationId: header.generationId ?? manifest.generationId };
+                    if (vectorCount === 0) {
+                      this.syncSearchIndexForFile(file, resolved);
+                    }
+                    await this.syncVectorsForFile(resolved);
                   }
                 } catch (err) {
                   this.logger.error(`Vector phase failed for ${file}:`, err);
@@ -494,6 +498,36 @@ export class StructurePipeline implements IStructurePipeline {
     // Remove noise words
     const noise = new Set(['src', 'lib', 'app', 'index', 'dist', 'out', 'obj', 'bin', 'wwwroot', 'js', 'cs', 'ts']);
     return Array.from(words).filter(w => !noise.has(w.toLowerCase())).join(' ');
+  }
+
+  private syncSearchIndexForFile(filePath: string, header: HeaderJson): void {
+    this.stateStore.removeFileIndex(filePath);
+    for (const method of header.methods) {
+      applyMethodMetadata(method, header.namespace);
+      this.stateStore.indexMethod(method.id, filePath, method.name, method.class, method.sig, method.loc, method.insight, header.generationId, {
+        namespace: method.namespace,
+        imports: header.imports,
+        exports: header.exports,
+        refs: method.refs,
+        decorators: method.decorators,
+        visibility: method.visibility,
+        isAsync: method.isAsync,
+        isStatic: method.isStatic,
+        parameters: method.parameters,
+        returnType: method.returnType,
+      });
+    }
+    for (const cls of header.classes) {
+      this.stateStore.indexClass(cls.id, filePath, cls.name, cls.loc, cls.insight, header.generationId, {
+        namespace: cls.namespace ?? header.namespace,
+        imports: header.imports,
+        exports: header.exports,
+        decorators: cls.decorators,
+        visibility: cls.visibility,
+        extends: cls.extends,
+        implements: cls.implements,
+      });
+    }
   }
 
   async syncVectorsForFile(header: HeaderJson): Promise<void> {

@@ -28,8 +28,9 @@ export class PrepareService {
     const intent = classifyPrepareIntent(task);
     const warnings: string[] = [];
     const stale = await this.staleService.inspect();
-    if (!stale.ok) {
-      warnings.push(`index has ${stale.issues.length} issue(s); run ${stale.suggestedNext[0] ?? 'nc stale'}`);
+    const staleWarning = formatPrepareStaleWarning(stale);
+    if (staleWarning) {
+      warnings.push(staleWarning);
     }
 
     const topResults = await this.searchService.execute({
@@ -164,6 +165,34 @@ function buildSuggestedNext(
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function formatPrepareStaleWarning(stale: Awaited<ReturnType<StaleService['inspect']>>): string | null {
+  const actionable = stale.issues.filter(issue => issue.severity !== 'low');
+  if (actionable.length === 0) {
+    return null;
+  }
+
+  const issueCount = (kind: string) => actionable.filter(issue => issue.kind === kind).length;
+  const changedFiles = stale.stats.changedFiles || issueCount('changed-file');
+  const missingFiles = stale.stats.missingFiles || issueCount('missing-file');
+  const missingHeaders = stale.stats.missingHeaders || issueCount('missing-header');
+  const vectorIssues = (stale.stats.missingVectors || issueCount('missing-vector'))
+    + (stale.stats.orphanVectors || issueCount('orphan-vector'))
+    + issueCount('vector-mismatch');
+  const insightIssues = (stale.stats.pendingInsights || issueCount('pending-insight'))
+    + (stale.stats.staleInsights || issueCount('stale-insight'));
+
+  const parts = [
+    changedFiles > 0 ? `${changedFiles} changed` : '',
+    missingFiles > 0 ? `${missingFiles} missing` : '',
+    missingHeaders > 0 ? `${missingHeaders} missing headers` : '',
+    vectorIssues > 0 ? `${vectorIssues} vector issues` : '',
+    insightIssues > 0 ? `${insightIssues} insight issues` : '',
+  ].filter(Boolean);
+
+  const summary = parts.length > 0 ? parts.join(', ') : `${actionable.length} index issues`;
+  return `index stale: ${summary}; run ${stale.suggestedNext[0] ?? 'nc stale'}`;
 }
 
 function formatResultSymbol(result: SearchResult): string {

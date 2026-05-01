@@ -667,7 +667,7 @@ test('prepare service builds compact task context with warnings memories and nex
   const report = await service.prepare('add refresh token support', 3);
   const output = formatPrepareReport(report);
 
-  assert.match(output, /warnings: index has 1 issue/);
+  assert.match(output, /warnings: index stale: 1 changed; run nc scan/);
   assert.match(output, /src\/auth.ts/);
   assert.match(output, /AuthService#refreshToken/);
   assert.match(output, /test\/auth.test.ts/);

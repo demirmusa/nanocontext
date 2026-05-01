@@ -13,6 +13,8 @@ interface RankedCandidate {
   result: SearchResult;
   score: number;
   signals: Set<SearchSignal>;
+  matchedBy: Set<NonNullable<SearchResult['matchedBy']>[number]>;
+  scoreParts: NonNullable<SearchResult['scoreParts']>;
   reasons: string[];
 }
 
@@ -170,10 +172,14 @@ export class SearchEngine implements ISearchEngine {
       const nativeScore = normalizeNativeScore(signal, result.score);
       const signalScore = (weight / (60 + rank)) + directBoost + pathBoost + nativeScore + typePriorityScore(result);
       const reasons = describeSignal(signal, directBoost, pathBoost, nativeScore);
+      const scoreParts = buildScoreParts(query, signal, directBoost, pathBoost, nativeScore, result);
+      const matchedBy = detectMatchedBy(query, result);
 
       if (existing) {
         existing.score += signalScore;
         existing.signals.add(signal);
+        for (const match of matchedBy) existing.matchedBy.add(match);
+        mergeScoreParts(existing.scoreParts, scoreParts);
         existing.reasons.push(...reasons);
         existing.result = mergeResults(existing.result, result);
         continue;
@@ -183,6 +189,8 @@ export class SearchEngine implements ISearchEngine {
         result: { ...result },
         score: signalScore,
         signals: new Set([signal]),
+        matchedBy: new Set(matchedBy),
+        scoreParts,
         reasons,
       });
     }
@@ -190,9 +198,13 @@ export class SearchEngine implements ISearchEngine {
 
   private finalizeCandidate(query: string, candidate: RankedCandidate): SearchResult {
     const signals = Array.from(candidate.signals);
+    const matchedBy = Array.from(candidate.matchedBy);
+    const scoreParts = roundScoreParts(candidate.scoreParts);
     return {
       ...candidate.result,
       score: Number(candidate.score.toFixed(6)),
+      matchedBy: matchedBy.length > 0 ? matchedBy : undefined,
+      scoreParts,
       matchReason: buildMatchReason(query, signals, candidate.reasons),
     };
   }
@@ -219,6 +231,25 @@ function lexicalBoostScore(query: string, result: Pick<SearchResult, 'file' | 'm
   for (const token of q.split(/\s+/).filter(Boolean)) {
     if (method.includes(token) || cls.includes(token)) score += 1.5;
     if (file.includes(token) || sig.includes(token) || text.includes(token)) score += 0.5;
+  }
+
+  return score;
+}
+
+function symbolBoostScore(query: string, result: Pick<SearchResult, 'method' | 'class'>): number {
+  const q = query.toLowerCase();
+  const method = result.method?.toLowerCase() ?? '';
+  const cls = result.class?.toLowerCase() ?? '';
+  let score = 0;
+
+  if (method === q || cls === q || `${cls}.${method}` === q || `${cls}#${method}` === q) {
+    score += 5;
+  }
+
+  for (const token of tokenize(query)) {
+    if (method === token || cls === token) {
+      score += 1.5;
+    }
   }
 
   return score;
@@ -259,6 +290,60 @@ function normalizeNativeScore(signal: SearchSignal, score: number | undefined): 
 
 function typePriorityScore(result: SearchResult): number {
   return result.type === 'memory' ? 0 : 0.2;
+}
+
+function buildScoreParts(
+  query: string,
+  signal: SearchSignal,
+  directBoost: number,
+  pathBoost: number,
+  nativeScore: number,
+  result: SearchResult,
+): NonNullable<SearchResult['scoreParts']> {
+  const symbol = symbolBoostScore(query, result);
+  return {
+    lexical: signal === 'lexical' || signal === 'exact' || signal === 'regex' ? directBoost + nativeScore : directBoost,
+    vector: signal === 'vector' ? nativeScore : 0,
+    memory: signal === 'memory' ? directBoost + nativeScore : 0,
+    symbol,
+    path: pathBoost,
+  };
+}
+
+function mergeScoreParts(target: NonNullable<SearchResult['scoreParts']>, source: NonNullable<SearchResult['scoreParts']>): void {
+  target.lexical = (target.lexical ?? 0) + (source.lexical ?? 0);
+  target.vector = (target.vector ?? 0) + (source.vector ?? 0);
+  target.memory = (target.memory ?? 0) + (source.memory ?? 0);
+  target.symbol = (target.symbol ?? 0) + (source.symbol ?? 0);
+  target.path = (target.path ?? 0) + (source.path ?? 0);
+}
+
+function roundScoreParts(parts: NonNullable<SearchResult['scoreParts']>): NonNullable<SearchResult['scoreParts']> {
+  return Object.fromEntries(
+    Object.entries(parts)
+      .filter(([, value]) => typeof value === 'number' && value > 0)
+      .map(([key, value]) => [key, Number(value.toFixed(6))]),
+  ) as NonNullable<SearchResult['scoreParts']>;
+}
+
+function detectMatchedBy(query: string, result: SearchResult): NonNullable<SearchResult['matchedBy']> {
+  const q = query.toLowerCase();
+  const tokens = tokenize(query);
+  const matches = new Set<NonNullable<SearchResult['matchedBy']>[number]>();
+  const hasMatch = (value: string | undefined): boolean => {
+    const lower = value?.toLowerCase() ?? '';
+    return lower.includes(q) || tokens.some(token => lower.includes(token));
+  };
+
+  if (hasMatch(result.method)) matches.add('name');
+  if (hasMatch(result.class)) matches.add('class');
+  if (hasMatch(result.sig)) matches.add('signature');
+  if (hasMatch(result.file)) matches.add('file path');
+  if (hasMatch(result.text) || result.type === 'memory') matches.add('memory');
+  if (result.refs?.some(ref => hasMatch(ref))) matches.add('refs');
+  if (hasMatch(result.insight)) matches.add('insight');
+
+  return Array.from(matches);
 }
 
 function buildResultKey(result: SearchResult): string {

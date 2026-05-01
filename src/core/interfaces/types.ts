@@ -56,6 +56,14 @@ export interface SearchResult {
   insight?: string;
   text?: string;
   score?: number;
+  matchedBy?: Array<'name' | 'class' | 'signature' | 'file path' | 'memory' | 'refs' | 'insight'>;
+  scoreParts?: {
+    lexical?: number;
+    vector?: number;
+    memory?: number;
+    symbol?: number;
+    path?: number;
+  };
   matchReason?: string;
   suggestedNext?: string;
   suggestedNextReason?: string;

@@ -334,7 +334,7 @@ export class SearchService {
     const clustered = await this.attachMemoryHints(clusterResults(results));
     const topConfidence = clustered[0]?.suggestedNextConfidence;
     const finalResults = clustered.map(result => ({
-      ...result,
+      ...attachExplainFields(result, query, fallbackPath),
       searchIntent: intent,
       searchTelemetry: {
         route: fallbackPath[0],
@@ -457,4 +457,55 @@ function buildSearchResultSymbolId(result: SearchResult): string | undefined {
     ? (result.class ? `${result.class}#${result.method}` : result.method)
     : result.class;
   return `${result.file}:${result.loc}:${result.type}:${display ?? ''}`;
+}
+
+function attachExplainFields(result: SearchResult, query: string, route: string[]): SearchResult {
+  const matchedBy = result.matchedBy ?? inferMatchedBy(query, result);
+  const scoreParts = result.scoreParts ?? inferScoreParts(query, route, result);
+  return {
+    ...result,
+    matchedBy: matchedBy.length > 0 ? matchedBy : undefined,
+    scoreParts,
+    matchReason: result.matchReason ?? buildRouteMatchReason(query, route, matchedBy),
+  };
+}
+
+function inferMatchedBy(query: string, result: SearchResult): NonNullable<SearchResult['matchedBy']> {
+  const q = query.toLowerCase();
+  const tokens = query.toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
+  const matches = new Set<NonNullable<SearchResult['matchedBy']>[number]>();
+  const hasMatch = (value: string | undefined): boolean => {
+    const lower = value?.toLowerCase() ?? '';
+    return lower.includes(q) || tokens.some(token => lower.includes(token));
+  };
+
+  if (hasMatch(result.method)) matches.add('name');
+  if (hasMatch(result.class)) matches.add('class');
+  if (hasMatch(result.sig)) matches.add('signature');
+  if (hasMatch(result.file)) matches.add('file path');
+  if (hasMatch(result.text) || result.type === 'memory') matches.add('memory');
+  if (result.refs?.some(ref => hasMatch(ref))) matches.add('refs');
+  if (hasMatch(result.insight)) matches.add('insight');
+  return Array.from(matches);
+}
+
+function inferScoreParts(query: string, route: string[], result: SearchResult): NonNullable<SearchResult['scoreParts']> {
+  const matchedBy = inferMatchedBy(query, result);
+  const routeSet = new Set(route);
+  const lexical = matchedBy.length > 0 && (routeSet.has('exact') || routeSet.has('regex') || routeSet.has('normalized-exact'))
+    ? 1
+    : undefined;
+  return {
+    lexical,
+    vector: routeSet.has('vector') || routeSet.has('semantic-fallback') ? result.score : undefined,
+    memory: result.type === 'memory' ? result.score ?? 1 : undefined,
+    symbol: matchedBy.some(match => match === 'name' || match === 'class') ? 1 : undefined,
+    path: matchedBy.includes('file path') ? 1 : undefined,
+  };
+}
+
+function buildRouteMatchReason(query: string, route: string[], matchedBy: NonNullable<SearchResult['matchedBy']>): string {
+  const routeText = route.join(' > ');
+  const matchText = matchedBy.length > 0 ? matchedBy.join(', ') : 'ranked candidate';
+  return `Search match for "${query}" via ${routeText}: ${matchText}.`;
 }

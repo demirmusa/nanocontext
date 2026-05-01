@@ -4,6 +4,7 @@ import { initCommand } from './commands/init';
 import { scanCommand } from './commands/scan';
 import { watchCommand, watchListCommand, watchStopCommand } from './commands/watch';
 import { searchCommand } from './commands/search';
+import { explainSearchCommand } from './commands/explain-search';
 import { inspectCommand } from './commands/inspect';
 import { headerCommand } from './commands/header';
 import { rememberCommand, memoriesCommand, forgetCommand } from './commands/memory';
@@ -104,6 +105,14 @@ program
   .option('-r, --regex', 'Regex search on names/signatures')
   .option('-l, --limit <number>', 'Max results', '3')
   .action(searchCommand);
+
+program
+  .command('explain-search <query>')
+  .description('Explain search ranking, route, matched fields, and score parts')
+  .option('-v, --vector', 'Use vector/semantic search')
+  .option('-r, --regex', 'Regex search on names/signatures')
+  .option('-l, --limit <number>', 'Max results', '5')
+  .action(explainSearchCommand);
 
 program
   .command('get <target>')

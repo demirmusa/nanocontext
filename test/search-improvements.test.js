@@ -503,6 +503,52 @@ test('search formatter prints compact fallback headings before grouped hits', ()
   assert.match(output, /src\/auth\.ts/);
 });
 
+test('search formatter explains route matched fields and score parts', () => {
+  const output = SearchFormatter.formatExplain('refresh token', [
+    {
+      type: 'method',
+      file: 'src/auth.ts',
+      method: 'refreshToken',
+      loc: '10-20',
+      score: 3.25,
+      matchedBy: ['name', 'signature'],
+      scoreParts: { lexical: 1.5, vector: 0.7, symbol: 1 },
+      matchReason: 'Hybrid match for "refresh token": lexical, vector.',
+      suggestedNext: 'nc get src/auth.ts[2-28]',
+      searchTelemetry: {
+        route: 'intent:semantic',
+        fallbackPath: ['intent:semantic', 'vector'],
+        rerankUsed: false,
+      },
+    },
+  ]);
+
+  assert.match(output, /Search explain: "refresh token"/);
+  assert.match(output, /route: intent:semantic > vector/);
+  assert.match(output, /matchedBy: name, signature/);
+  assert.match(output, /scoreParts: lexical=1.5, vector=0.7, symbol=1/);
+  assert.match(output, /next: nc get src\/auth.ts\[2-28\]/);
+});
+
+test('search service attaches explain fields to exact route results', async () => {
+  const service = new SearchService(
+    {
+      search: async () => [],
+      searchDeep: async () => [],
+      searchExact: () => [{ type: 'method', file: 'src/auth.ts', class: 'AuthService', method: 'refreshToken', loc: '10-20', sig: 'refreshToken()' }],
+      searchRegex: () => [],
+      searchRegexDeep: async () => [],
+    },
+    createSearchConfigManager(),
+  );
+
+  const [result] = await service.execute({ mode: 'exact', query: 'refreshToken' });
+  assert.deepEqual(result.matchedBy, ['name', 'signature']);
+  assert.equal(result.scoreParts.lexical, 1);
+  assert.equal(result.scoreParts.symbol, 1);
+  assert.equal(result.searchTelemetry.route, 'exact');
+});
+
 test('memory service stores and lists symbol-scoped notes', async () => {
   const calls = [];
   const memoryService = new MemoryService(

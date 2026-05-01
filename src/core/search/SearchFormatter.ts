@@ -67,6 +67,8 @@ export class SearchFormatter {
         loc: r.loc,
         sig: r.sig,
         score: r.score,
+        matchedBy: r.matchedBy,
+        scoreParts: r.scoreParts,
         refs: r.refs,
         insight: r.insight,
         text: r.text,
@@ -85,8 +87,59 @@ export class SearchFormatter {
     );
   }
 
+  static formatExplain(query: string, results: SearchResult[]): string {
+    const lines: string[] = [`Search explain: "${query}"`];
+    const telemetry = results[0]?.searchTelemetry;
+    if (telemetry) {
+      lines.push(`route: ${(telemetry.fallbackPath ?? [telemetry.route]).filter(Boolean).join(' > ')}`);
+      lines.push(`rerank: ${telemetry.rerankUsed === undefined ? 'n/a' : telemetry.rerankUsed ? 'yes' : 'no'}`);
+    }
+    if (results[0]?.fallback) {
+      const fallback = results[0].fallback;
+      lines.push(`fallback: ${fallback.mode} from ${fallback.from} (${fallback.reason})`);
+    }
+    lines.push('');
+
+    if (results.length === 0) {
+      lines.push('No results found.');
+      return lines.join('\n');
+    }
+
+    for (const [index, result] of results.entries()) {
+      const label = result.type === 'memory'
+        ? `[memory] ${result.text ?? result.id ?? 'memory'}`
+        : `${result.file ?? 'unknown'} ${result.method ?? result.class ?? ''}${result.loc ? `[${result.loc}]` : ''}`.trim();
+      lines.push(`${index + 1}. ${label}`);
+      lines.push(`   score: ${result.score ?? 'n/a'}`);
+      if (result.matchedBy?.length) {
+        lines.push(`   matchedBy: ${result.matchedBy.join(', ')}`);
+      }
+      if (result.scoreParts) {
+        lines.push(`   scoreParts: ${formatScoreParts(result.scoreParts)}`);
+      }
+      if (result.matchReason) {
+        lines.push(`   reason: ${result.matchReason}`);
+      }
+      if (result.suggestedNext) {
+        lines.push(`   next: ${result.suggestedNext}`);
+      }
+      if (result.related?.length) {
+        lines.push(`   related: ${result.related.map(item => `${item.method || item.class}[${item.loc}]`).join(', ')}`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
   private static extractParams(sig: string): string {
     const match = sig.match(/\(([^)]*)\)/);
     return match ? match[1] : '';
   }
+}
+
+function formatScoreParts(scoreParts: NonNullable<SearchResult['scoreParts']>): string {
+  return Object.entries(scoreParts)
+    .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
+    .map(([key, value]) => `${key}=${value}`)
+    .join(', ');
 }

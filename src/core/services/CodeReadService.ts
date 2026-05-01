@@ -121,7 +121,7 @@ export class CodeReadService {
       return { query: target, candidates: [], reason: 'empty query' };
     }
 
-    const candidates = trimmed.includes('#')
+    const candidates = trimmed.includes('#') && this.hasFileScopedPrefix(trimmed)
       ? await this.resolveFileScopedSymbolCandidates(trimmed)
       : await this.resolveIndexedSymbolCandidates(trimmed);
 
@@ -154,6 +154,10 @@ export class CodeReadService {
   }
 
   isLikelyFilePath(target: string): boolean {
+    if (target.includes('#')) {
+      return false;
+    }
+
     try {
       const { absolutePath } = resolveProjectPath(target, this.configManager.getProjectRoot());
       return fs.existsSync(absolutePath);
@@ -212,14 +216,40 @@ export class CodeReadService {
     ];
   }
 
+  private hasFileScopedPrefix(target: string): boolean {
+    const separatorIndex = target.indexOf('#');
+    if (separatorIndex <= 0) {
+      return false;
+    }
+
+    const prefix = target.slice(0, separatorIndex);
+    if (!/[\\/]|^\.[\\/]|[.][A-Za-z0-9]+$/.test(prefix)) {
+      return false;
+    }
+
+    try {
+      const { absolutePath } = resolveProjectPath(prefix, this.configManager.getProjectRoot());
+      return fs.existsSync(absolutePath);
+    } catch (error) {
+      if (error instanceof ProjectPathError) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   private async resolveIndexedSymbolCandidates(target: string): Promise<SymbolCandidate[]> {
-    const exact = this.pickSymbolResults(this.stateStore.searchExact(target, 8), target);
+    const exactResults = indexedSymbolQueries(target).flatMap(query => this.stateStore.searchExact(query, 8));
+    const exact = this.pickSymbolResults(exactResults, target);
     if (exact.length > 0) {
       return exact;
     }
 
-    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return this.pickSymbolResults(this.stateStore.searchRegex(escaped, 8), target);
+    const regexResults = indexedSymbolQueries(target).flatMap(query => {
+      const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return this.stateStore.searchRegex(escaped, 8);
+    });
+    return this.pickSymbolResults(regexResults, target);
   }
 
   private async readTargetPreview(
@@ -374,6 +404,17 @@ function expandLoc(loc: string, padding: number): string {
 
 function sameResolutionScore(a: SymbolCandidate, b: SymbolCandidate): boolean {
   return (a.confidence ?? 'low') === (b.confidence ?? 'low') && (a.matchType ?? 'fallback') === (b.matchType ?? 'fallback');
+}
+
+function indexedSymbolQueries(target: string): string[] {
+  const queries = [target];
+  if (target.includes('#')) {
+    const [className, methodName] = target.split('#');
+    if (className && methodName) {
+      queries.push(`${className}.${methodName}`, methodName, className);
+    }
+  }
+  return [...new Set(queries)];
 }
 
 function dedupeCandidates(candidates: Array<SymbolCandidate & { score: number }>): Array<SymbolCandidate & { score: number }> {

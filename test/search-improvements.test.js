@@ -210,7 +210,7 @@ test('code read service resolves file-scoped and indexed symbol targets', async 
       indexMethod: () => {},
       indexClass: () => {},
       removeFileIndex: () => {},
-      searchExact: (query) => query === 'AuthService.BuildToken'
+      searchExact: (query) => query === 'AuthService.BuildToken' || query === 'BuildToken'
         ? [{ type: 'method', file: 'src/auth/AuthService.cs', method: 'BuildToken', class: 'AuthService', loc: '6-8', sig: 'string BuildToken()' }]
         : [],
       searchRegex: () => [],
@@ -225,6 +225,7 @@ test('code read service resolves file-scoped and indexed symbol targets', async 
 
   assert.equal(codeReadService.isLikelyFilePath('src/auth/AuthService.cs'), true);
   assert.equal(codeReadService.isLikelyFilePath('AuthService.BuildToken'), false);
+  assert.equal(codeReadService.isLikelyFilePath('AuthService#BuildToken'), false);
 
   const fileScoped = await codeReadService.readSymbolSnippet('src/auth/AuthService.cs#BuildToken');
   assert.equal(fileScoped.target.file, 'src/auth/AuthService.cs');
@@ -238,6 +239,11 @@ test('code read service resolves file-scoped and indexed symbol targets', async 
   const resolution = await codeReadService.resolveSymbolTarget('AuthService.BuildToken');
   assert.equal(resolution.matched.display, 'AuthService#BuildToken');
   assert.equal(resolution.matched.matchType, 'qualified');
+
+  const hashResolution = await codeReadService.resolveSymbolTarget('AuthService#BuildToken');
+  assert.equal(hashResolution.matched.file, 'src/auth/AuthService.cs');
+  assert.equal(hashResolution.matched.display, 'AuthService#BuildToken');
+  assert.equal(hashResolution.matched.matchType, 'qualified');
 });
 
 test('code read service reports ambiguity for short symbol queries', async () => {

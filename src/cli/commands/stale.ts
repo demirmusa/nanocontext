@@ -34,7 +34,7 @@ function printStaleReport(report: StaleReport, compact: boolean = false): void {
   console.log(`  Missing headers:   ${severityCount(report.stats.missingHeaders)}`);
   console.log(`  Parser issues:     ${severityCount(report.stats.parseFailures + report.stats.unsupportedFiles)}`);
   console.log(`  Insight queue:     ${colors.cyan(`${report.stats.pendingInsights} pending, ${report.stats.staleInsights} stale`)}`);
-  console.log(`  Vectors/methods:   ${colors.cyan(`${report.stats.vectorCount}/${report.stats.totalMethods}`)}`);
+  console.log(`  Vectors/symbols:   ${colors.cyan(`${report.stats.vectorCount}/${report.stats.totalSymbols}`)}`);
   console.log(`  Generation issues: ${severityCount(report.stats.generationMismatches)}`);
   console.log(`  Last scan:         ${colors.cyan(report.stats.lastScanAt ?? 'unknown')}`);
 
@@ -65,7 +65,7 @@ function printStaleReport(report: StaleReport, compact: boolean = false): void {
 
 function printCompactReport(report: StaleReport): void {
   const status = report.ok ? 'ok' : 'issues';
-  console.log(`status=${status} tracked=${report.stats.trackedFiles} changed=${report.stats.changedFiles} missing=${report.stats.missingFiles} headers=${report.stats.missingHeaders} vectors=${report.stats.vectorCount}/${report.stats.totalMethods} generationIssues=${report.stats.generationMismatches} pendingInsights=${report.stats.pendingInsights} staleInsights=${report.stats.staleInsights}`);
+  console.log(`status=${status} tracked=${report.stats.trackedFiles} changed=${report.stats.changedFiles} missing=${report.stats.missingFiles} headers=${report.stats.missingHeaders} vectors=${report.stats.vectorCount}/${report.stats.totalSymbols} generationIssues=${report.stats.generationMismatches} pendingInsights=${report.stats.pendingInsights} staleInsights=${report.stats.staleInsights}`);
   for (const issue of report.issues.slice(0, 30)) {
     const subject = issue.symbol ? `${issue.file ?? ''}#${issue.symbol}` : issue.file ?? '-';
     console.log(`${issue.severity} ${issue.category}/${issue.kind} ${subject} action="${issue.action}" detail="${issue.detail}"`);

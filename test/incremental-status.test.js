@@ -212,6 +212,7 @@ test('stale service reports categorized index integrity issues with actions', as
       getChecksum: () => 'old-checksum',
       getPendingInsightCount: () => 2,
       getStats: () => ({ totalFiles: 3, totalMethods: 3, lastScanAt: null }),
+      getIndexedSymbolCount: () => 4,
     },
     {
       count: async () => 1,
@@ -222,7 +223,8 @@ test('stale service reports categorized index integrity issues with actions', as
   assert.equal(report.ok, false);
   assert.equal(report.stats.changedFiles, 2);
   assert.equal(report.stats.missingFiles, 1);
-  assert.equal(report.stats.missingVectors, 2);
+  assert.equal(report.stats.missingVectors, 3);
+  assert.equal(report.stats.totalSymbols, 4);
   assert.equal(report.stats.staleInsights, 1);
   assert.ok(report.categories.files.some(issue => issue.kind === 'changed-file' && issue.action.includes('nc')));
   assert.ok(report.categories.vectors.some(issue => issue.kind === 'missing-vector'));

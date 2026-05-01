@@ -5,7 +5,6 @@ import { IStateStore } from '../interfaces/IStateStore';
 import { IVectorStore } from '../interfaces/IVectorStore';
 import { computeChecksum } from '../../utils/checksum';
 import { resolveProjectPath } from '../../utils/projectPath';
-import { ScanManifestService } from './ScanManifestService';
 
 export interface StaleReport {
   ok: boolean;
@@ -22,6 +21,7 @@ export interface StaleReport {
     orphanVectors: number;
     generationMismatches: number;
     vectorCount: number;
+    totalSymbols: number;
     totalMethods: number;
     lastScanAt: string | null;
   };
@@ -65,7 +65,6 @@ export class StaleService {
     const config = await this.configManager.loadProjectConfig();
     const trackedFiles = this.stateStore.listTrackedFiles().sort((a, b) => a.localeCompare(b));
     const supportedExtensions = supportedExtensionsFor(config.languages);
-    const latestManifest = new ScanManifestService(this.configManager.getProjectRoot()).readLatest();
     let staleInsights = 0;
 
     for (const file of trackedFiles) {
@@ -135,27 +134,6 @@ export class StaleService {
       }
 
       const header = await this.headerStore.read(file);
-      if (header && latestManifest && header.generationId && header.generationId !== latestManifest.generationId) {
-        issues.push({
-          kind: 'scan-generation-mismatch',
-          category: 'generation',
-          severity: 'low',
-          file,
-          detail: `header generation ${header.generationId} differs from latest scan ${latestManifest.generationId}`,
-          action: 'nc scan',
-        });
-      }
-      const indexGenerations = this.stateStore.getFileIndexGenerations?.(file) ?? [];
-      if (latestManifest && indexGenerations.some(generation => generation !== latestManifest.generationId)) {
-        issues.push({
-          kind: 'scan-generation-mismatch',
-          category: 'generation',
-          severity: 'low',
-          file,
-          detail: `SQLite index generations ${indexGenerations.join(', ')} differ from latest scan ${latestManifest.generationId}`,
-          action: 'nc scan',
-        });
-      }
       if (config.aiInsight && header) {
         for (const method of header.methods) {
           if (!method.insight) {
@@ -187,14 +165,15 @@ export class StaleService {
 
     const stats = this.stateStore.getStats();
     const vectorCount = await this.vectorStore.count();
-    const missingVectors = Math.max(0, stats.totalMethods - vectorCount);
-    const orphanVectors = Math.max(0, vectorCount - stats.totalMethods);
+    const totalSymbols = this.stateStore.getIndexedSymbolCount?.() ?? stats.totalMethods;
+    const missingVectors = Math.max(0, totalSymbols - vectorCount);
+    const orphanVectors = Math.max(0, vectorCount - totalSymbols);
     if (missingVectors > 0) {
       issues.push({
         kind: 'missing-vector',
         category: 'vectors',
         severity: 'medium',
-        detail: `${missingVectors} indexed methods do not appear to have vectors`,
+        detail: `${missingVectors} indexed symbols do not appear to have vectors`,
         action: 'nc scan --rebuild-vectors',
       });
     }
@@ -207,12 +186,12 @@ export class StaleService {
         action: 'nc scan --rebuild-vectors',
       });
     }
-    if (vectorCount !== stats.totalMethods) {
+    if (vectorCount !== totalSymbols) {
       issues.push({
         kind: 'vector-mismatch',
         category: 'vectors',
         severity: 'medium',
-        detail: `vector count ${vectorCount} differs from indexed method count ${stats.totalMethods}`,
+        detail: `vector count ${vectorCount} differs from indexed symbol count ${totalSymbols}`,
         action: 'nc scan --rebuild-vectors',
       });
     }
@@ -243,6 +222,7 @@ export class StaleService {
         orphanVectors,
         generationMismatches: issues.filter(issue => issue.kind === 'scan-generation-mismatch').length,
         vectorCount,
+        totalSymbols,
         totalMethods: stats.totalMethods,
         lastScanAt: stats.lastScanAt,
       },

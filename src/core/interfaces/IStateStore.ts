@@ -19,6 +19,7 @@ export interface IStateStore {
   indexMethod(id: string, file: string, name: string, className: string | undefined, sig: string, loc: string, insight: string | undefined, generationId?: string, metadata?: SymbolIndexMetadata): void;
   indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined, generationId?: string, metadata?: SymbolIndexMetadata): void;
   getFileIndexGenerations?(file: string): string[];
+  getIndexedSymbolCount?(): number;
   removeFileIndex(file: string): void;
   searchExact(query: string, limit?: number): SearchResult[];
   searchLexical?(query: string, limit?: number): SearchResult[];

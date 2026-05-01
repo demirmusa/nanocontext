@@ -303,6 +303,13 @@ export class SqliteStateStore implements IStateStore {
     return rows.map(row => row.generation_id);
   }
 
+  getIndexedSymbolCount(): number {
+    const row = this.db!.prepare(
+      "SELECT COUNT(*) as count FROM search_index WHERE type IN ('method', 'class')"
+    ).get() as { count: number };
+    return row.count;
+  }
+
   removeFileIndex(file: string): void {
     this.db!.prepare('DELETE FROM search_index WHERE file = ?').run(file);
     this.db!.prepare('DELETE FROM search_index_fts WHERE file = ?').run(file);

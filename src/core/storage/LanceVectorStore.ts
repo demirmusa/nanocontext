@@ -7,6 +7,7 @@ export class LanceVectorStore implements IVectorStore {
   private dbPath: string;
   private db: lancedb.Connection | null = null;
   private table: lancedb.Table | null = null;
+  private tableReady: Promise<void> | null = null;
   constructor(projectRoot: string) {
     this.dbPath = path.join(projectRoot, '.nanocontext', 'db', 'vectors.lance');
   }
@@ -40,18 +41,26 @@ export class LanceVectorStore implements IVectorStore {
       generation_id: r.generationId || '',
     }));
 
-    if (!this.table) {
-      this.table = await this.db.createTable('vectors', data);
-    } else {
-      // Remove existing records with same IDs (escape single quotes to prevent injection)
-      const ids = records.map(r => r.id.replace(/'/g, "''"));
-      try {
-        await this.table.delete(`id IN ('${ids.join("','")}')`);
-      } catch (_) {
-        // Table might be empty or IDs don't exist
-      }
-      await this.table.add(data);
+    if (!this.table && !this.tableReady) {
+      // First concurrent caller creates the table with its data
+      this.tableReady = this.db.createTable('vectors', data).then(t => { this.table = t; });
+      await this.tableReady;
+      return;
     }
+
+    if (!this.table && this.tableReady) {
+      // Concurrent callers wait for the table, then add normally
+      await this.tableReady;
+    }
+
+    // Remove existing records with same IDs (escape single quotes to prevent injection)
+    const ids = records.map(r => r.id.replace(/'/g, "''"));
+    try {
+      await this.table!.delete(`id IN ('${ids.join("','")}')`);
+    } catch (_) {
+      // Table might be empty or IDs don't exist
+    }
+    await this.table!.add(data);
   }
 
   async remove(ids: string[]): Promise<void> {
@@ -111,6 +120,7 @@ export class LanceVectorStore implements IVectorStore {
     if (this.db && this.table) {
       await this.db.dropTable('vectors');
       this.table = null;
+      this.tableReady = null;
     }
   }
 

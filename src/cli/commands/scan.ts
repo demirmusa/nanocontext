@@ -225,9 +225,16 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
     console.log(colors.green('✓ Scan complete.'));
 
     console.log(colors.dim(`  Files: ${stats.totalFiles} | Methods: ${stats.totalMethods}`));
+    const cacheStats = container.indexService.getEmbeddingCacheStats();
+    if (cacheStats) {
+      console.log(colors.dim(`  Embedding cache: ${cacheStats.hits} hits, ${cacheStats.misses} misses, ${cacheStats.writes} writes, ${cacheStats.errors} errors`));
+    }
 
     if (verbose) {
       display.log(`[SUMMARY] files=${stats.totalFiles} methods=${stats.totalMethods} insightOK=${insightSuccessCount} insightErrors=${insightErrorCount}`);
+      if (cacheStats) {
+        display.log(`[EMBEDDING CACHE] hits=${cacheStats.hits} misses=${cacheStats.misses} writes=${cacheStats.writes} errors=${cacheStats.errors}`);
+      }
       display.finalize();
       console.log(colors.dim(`  Insight: ${insightSuccessCount} OK, ${insightErrorCount} errors`));
     }

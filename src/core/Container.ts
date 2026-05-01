@@ -5,6 +5,7 @@ import { HeaderStore } from './storage/HeaderStore';
 import { LanceVectorStore } from './storage/LanceVectorStore';
 import { LLMProviderFactory } from './llm/LLMProviderFactory';
 import { EmbeddingProviderFactory } from './embedding/EmbeddingProviderFactory';
+import { CachedEmbeddingProvider } from './embedding/CachedEmbeddingProvider';
 import { createDefaultRegistry } from './parser';
 import { StructurePipeline } from './pipeline/StructurePipeline';
 import { InsightPipeline } from './pipeline/InsightPipeline';
@@ -362,7 +363,11 @@ export class Container {
     if (userConfig.embedding.provider !== 'none') {
       try {
         const embeddingFactory = new EmbeddingProviderFactory();
-        this._embeddingProvider = embeddingFactory.create(userConfig.embedding);
+        this._embeddingProvider = new CachedEmbeddingProvider(
+          embeddingFactory.create(userConfig.embedding),
+          this.configManager.getProjectRoot(),
+          userConfig.embedding.model,
+        );
 
         // Initialize vector store with provider dimensions
         await this.vectorStore.initialize(this._embeddingProvider.dimensions);

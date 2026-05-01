@@ -6,6 +6,7 @@ import { IStructurePipeline, ISyncService } from '../interfaces/IPipeline';
 import { IVectorStore } from '../interfaces/IVectorStore';
 import { ScanProgress, SyncResult } from '../interfaces/types';
 import { normalizeProjectPath } from '../../utils/projectPath';
+import { EmbeddingCacheStats } from '../embedding/CachedEmbeddingProvider';
 
 export interface IndexRuntimeConfigSummary {
   aiInsight: boolean;
@@ -48,6 +49,11 @@ export class IndexService {
   async rebuildVectors(): Promise<void> {
     await this.vectorStore.clear();
     await this.vectorStore.initialize(this.embeddingProvider?.dimensions ?? 768);
+  }
+
+  getEmbeddingCacheStats(): EmbeddingCacheStats | null {
+    const provider = this.embeddingProvider as (IEmbeddingProvider & { getCacheStats?: () => EmbeddingCacheStats }) | null;
+    return provider?.getCacheStats?.() ?? null;
   }
 
   scanFiles(files: string[]): Promise<SyncResult[]> {

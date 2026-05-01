@@ -6,6 +6,7 @@ const path = require('node:path');
 const { ConfigManager } = require('../dist/core/config/ConfigManager');
 const { Container } = require('../dist/core/Container');
 const { CachedEmbeddingProvider } = require('../dist/core/embedding/CachedEmbeddingProvider');
+const { OllamaEmbeddingProvider } = require('../dist/core/embedding/providers/OllamaEmbeddingProvider');
 const { GuardedEmbeddingProvider } = require('../dist/core/providers/ProviderGuard');
 const { createTempProject } = require('./helpers/project');
 
@@ -106,4 +107,125 @@ test('guarded embedding provider retries retryable failures and stops on non-ret
   await assert.rejects(() => nonRetryable.embed('x'), /bad request/);
   assert.equal(nonRetryable.getProviderGuardStats().retries, 0);
   assert.equal(nonRetryable.getProviderGuardStats().nonRetryableFailures, 1);
+});
+
+test('guarded ollama embedding provider serializes local embedding calls', async () => {
+  let active = 0;
+  let maxActive = 0;
+  const provider = new GuardedEmbeddingProvider({
+    name: 'ollama',
+    dimensions: 1,
+    isAvailable: async () => true,
+    embed: async () => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      active--;
+      return [1];
+    },
+    embedBatch: async () => [],
+  }, { baseDelayMs: 1, timeoutMs: 1000 });
+
+  await Promise.all([
+    provider.embed('a'),
+    provider.embed('b'),
+    provider.embed('c'),
+  ]);
+
+  assert.equal(maxActive, 1);
+});
+
+test('ollama embedding provider truncates oversized prompts before sending', async (t) => {
+  const originalFetch = global.fetch;
+  let sentPrompt = '';
+  global.fetch = async (_url, options) => {
+    sentPrompt = JSON.parse(options.body).prompt;
+    return new Response(JSON.stringify({ embedding: [1] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  t.after(() => { global.fetch = originalFetch; });
+
+  const provider = new OllamaEmbeddingProvider({
+    provider: 'ollama',
+    endpoint: 'http://localhost:11434',
+    model: 'tiny',
+  });
+
+  await provider.embed('x'.repeat(7000));
+
+  assert.equal(sentPrompt.length, 2000);
+});
+
+test('ollama embedding provider shrinks prompts after context length errors', async (t) => {
+  const originalFetch = global.fetch;
+  const sentLengths = [];
+  global.fetch = async (_url, options) => {
+    const prompt = JSON.parse(options.body).prompt;
+    sentLengths.push(prompt.length);
+    if (prompt.length > 500) {
+      return new Response(JSON.stringify({ error: 'the input length exceeds the context length' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ embedding: [1] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  t.after(() => { global.fetch = originalFetch; });
+
+  const provider = new OllamaEmbeddingProvider({
+    provider: 'ollama',
+    endpoint: 'http://localhost:11434',
+    model: 'tiny',
+  });
+
+  assert.deepEqual(await provider.embed('x'.repeat(7000)), [1]);
+  assert.deepEqual(sentLengths, [2000, 1000, 500]);
+});
+
+test('ollama embedding provider surfaces context length errors after minimum prompt size', async (t) => {
+  const originalFetch = global.fetch;
+  let calls = 0;
+  global.fetch = async () => {
+    calls++;
+    return new Response(JSON.stringify({ error: 'the input length exceeds the context length' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  t.after(() => { global.fetch = originalFetch; });
+
+  const provider = new OllamaEmbeddingProvider({
+    provider: 'ollama',
+    endpoint: 'http://localhost:11434',
+    model: 'tiny',
+  });
+
+  await assert.rejects(() => provider.embed('x'.repeat(7000)), /context length/);
+  assert.equal(calls, 4);
+});
+
+test('guarded provider does not retry deterministic context length failures', async () => {
+  let attempts = 0;
+  const provider = new GuardedEmbeddingProvider({
+    name: 'fake',
+    dimensions: 1,
+    isAvailable: async () => true,
+    embed: async () => {
+      attempts++;
+      const error = new Error('Ollama embedding error: 500 {"error":"the input length exceeds the context length"}');
+      error.status = 500;
+      throw error;
+    },
+    embedBatch: async () => [],
+  }, { maxRetries: 3, baseDelayMs: 1, timeoutMs: 1000, maxConcurrency: 1 });
+
+  await assert.rejects(() => provider.embed('x'), /context length/);
+  assert.equal(attempts, 1);
+  assert.equal(provider.getProviderGuardStats().retries, 0);
+  assert.equal(provider.getProviderGuardStats().nonRetryableFailures, 1);
 });

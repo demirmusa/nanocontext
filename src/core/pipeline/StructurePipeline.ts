@@ -326,10 +326,6 @@ export class StructurePipeline implements IStructurePipeline {
             const file = vectorFiles[nextIdx++];
             running++;
 
-            progress.currentFile = file;
-            progress.skipped = false;
-            onProgress?.(progress);
-
             (async () => {
               try {
                 const header = await this.headerStore.read(file);
@@ -342,8 +338,9 @@ export class StructurePipeline implements IStructurePipeline {
 
               running--;
               progress.processedFiles++;
-              progress.currentFile = undefined;
+              progress.currentFile = file;
               onProgress?.(progress);
+              progress.currentFile = undefined;
 
               if (running === 0 && nextIdx >= vectorFiles.length) {
                 resolveAll();

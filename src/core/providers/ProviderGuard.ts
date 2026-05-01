@@ -185,7 +185,7 @@ function providerConcurrency(provider: string): number {
     case 'anthropic':
       return 4;
     case 'ollama':
-      return 2;
+      return 1;
     default:
       return 2;
   }
@@ -194,6 +194,9 @@ function providerConcurrency(provider: string): number {
 function isRetryableProviderError(error: unknown): boolean {
   if (isTimeoutError(error) || isRateLimitError(error)) {
     return true;
+  }
+  if (isContextLengthError(error)) {
+    return false;
   }
   const status = errorStatus(error);
   return status === 408 || status === 409 || status === 425 || (status !== undefined && status >= 500);
@@ -205,6 +208,10 @@ function isRateLimitError(error: unknown): boolean {
 
 function isTimeoutError(error: unknown): boolean {
   return errorMessage(error) === 'provider-timeout' || /timeout|timed out|ETIMEDOUT/i.test(errorMessage(error));
+}
+
+function isContextLengthError(error: unknown): boolean {
+  return /input length exceeds the context length|context length/i.test(errorMessage(error));
 }
 
 function errorStatus(error: unknown): number | undefined {

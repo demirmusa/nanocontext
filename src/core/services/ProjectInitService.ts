@@ -3,6 +3,18 @@ import * as path from 'path';
 import { ConfigManager } from '../config/ConfigManager';
 import { EmbeddingConfig, LLMConfig } from '../interfaces/types';
 
+const DEFAULT_IGNORE_PATTERNS = [
+  '**/node_modules/**',
+  '**/dist/**',
+  '**/.git/**',
+  '**/bin/**',
+  '**/obj/**',
+  '**/log/**',
+  '**/logs/**',
+  '**/*.min.js',
+  '**/*.bundle.js',
+];
+
 export interface InitConfigInput {
   languages: string[];
   includePatterns: string[];
@@ -126,7 +138,9 @@ export class ProjectInitService {
     const changes: string[] = [];
     const ignorePath = path.join(cwd, '.nanocontextignore');
     if (!fs.existsSync(ignorePath)) {
-      fs.writeFileSync(ignorePath, '**/node_modules/**\n**/dist/**\n**/.git/**\n**/bin/**\n**/obj/**\n**/log/**\n**/logs/**\n**/*.min.js\n**/*.bundle.js\n', 'utf-8');
+      fs.writeFileSync(ignorePath, `${DEFAULT_IGNORE_PATTERNS.join('\n')}\n`, 'utf-8');
+      changes.push('.nanocontextignore');
+    } else if (appendMissingIgnorePatterns(ignorePath, DEFAULT_IGNORE_PATTERNS)) {
       changes.push('.nanocontextignore');
     }
 
@@ -156,4 +170,17 @@ export class ProjectInitService {
   ensureProjectFiles(cwd: string): string[] {
     return this.scaffoldProjectFiles(cwd);
   }
+}
+
+function appendMissingIgnorePatterns(ignorePath: string, patterns: string[]): boolean {
+  const content = fs.readFileSync(ignorePath, 'utf-8');
+  const existing = new Set(content.split(/\r?\n/).map(line => line.trim()).filter(Boolean));
+  const missing = patterns.filter(pattern => !existing.has(pattern));
+  if (missing.length === 0) {
+    return false;
+  }
+
+  const prefix = content.length > 0 && !content.endsWith('\n') ? '\n' : '';
+  fs.appendFileSync(ignorePath, `${prefix}${missing.join('\n')}\n`, 'utf-8');
+  return true;
 }

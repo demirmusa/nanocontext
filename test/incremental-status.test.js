@@ -165,7 +165,7 @@ test('sync service updates last scan time for unchanged incremental syncs', asyn
 test('stale service reports categorized index integrity issues with actions', async (t) => {
   const projectRoot = createTempProject({
     'src/example.ts': 'export function run() { return 2; }\n',
-    'src/readme.md': '# unsupported\n',
+    'src/data.json': '{"unsupported": true}\n',
   });
   t.after(() => fs.rmSync(projectRoot, { recursive: true, force: true }));
 
@@ -208,7 +208,7 @@ test('stale service reports categorized index integrity issues with actions', as
       getHeaderPath: () => '',
     },
     {
-      listTrackedFiles: () => ['src/example.ts', 'src/missing.ts', 'src/readme.md'],
+      listTrackedFiles: () => ['src/example.ts', 'src/missing.ts', 'src/data.json'],
       getChecksum: () => 'old-checksum',
       getPendingInsightCount: () => 2,
       getStats: () => ({ totalFiles: 3, totalMethods: 3, lastScanAt: null }),

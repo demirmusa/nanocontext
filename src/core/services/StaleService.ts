@@ -255,7 +255,7 @@ function groupIssues(issues: StaleIssue[]): Record<string, StaleIssue[]> {
 }
 
 function supportedExtensionsFor(languages: string[]): Set<string> {
-  const extensions = new Set<string>();
+  const extensions = new Set<string>(['.md', '.mdx', '.txt']);
   for (const language of languages) {
     switch (language.toLowerCase()) {
       case 'typescript':
@@ -270,6 +270,14 @@ function supportedExtensionsFor(languages: string[]): Set<string> {
         break;
       case 'csharp':
         extensions.add('.cs');
+        break;
+      case 'markdown':
+        extensions.add('.md');
+        extensions.add('.mdx');
+        break;
+      case 'text':
+      case 'plaintext':
+        extensions.add('.txt');
         break;
     }
   }

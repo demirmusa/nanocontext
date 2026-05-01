@@ -34,6 +34,27 @@ test('method identities stay unique for overloads and same-name methods', () => 
   assert.notEqual(header.methods[0].id, header.methods[2].id);
 });
 
+test('method identities disambiguate repeated helper declarations with same signature', () => {
+  const header = applyHeaderIdentity({
+    file: 'src/example.js',
+    lang: 'javascript',
+    checksum: 'checksum',
+    classes: [],
+    methods: [
+      { name: 'fmtAmt', loc: '10-10', sig: 'function fmtAmt(n)', refs: [] },
+      { name: 'fmtAmt', loc: '20-20', sig: 'function fmtAmt(n)', refs: [] },
+      { name: 'currSym', loc: '11-11', sig: 'function currSym(code)', refs: [] },
+      { name: 'currSym', loc: '21-21', sig: 'function currSym(code)', refs: [] },
+    ],
+    imports: [],
+    exports: [],
+  });
+
+  assert.equal(new Set(header.methods.map(method => method.id)).size, 4);
+  assert.notEqual(header.methods[0].id, header.methods[1].id);
+  assert.notEqual(header.methods[2].id, header.methods[3].id);
+});
+
 test('deep search enriches the exact method id instead of the first matching name', async () => {
   const header = applyHeaderIdentity({
     file: 'src/example.ts',

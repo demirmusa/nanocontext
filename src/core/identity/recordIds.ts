@@ -9,6 +9,10 @@ export function buildMethodId(filePath: string, method: Pick<MethodInfo, 'name' 
   return `method:${hashIdentity([filePath, method.class ?? '', method.name, method.sig])}`;
 }
 
+function buildMethodIdWithLocation(filePath: string, method: Pick<MethodInfo, 'name' | 'class' | 'sig' | 'loc'>): string {
+  return `method:${hashIdentity([filePath, method.class ?? '', method.name, method.sig, method.loc])}`;
+}
+
 export function buildClassId(filePath: string, cls: Pick<ClassInfo, 'name' | 'loc'>): string {
   return `class:${hashIdentity([filePath, cls.name, cls.loc])}`;
 }
@@ -37,9 +41,29 @@ type HeaderIdentityInput = Omit<HeaderJson, 'classes' | 'methods'> & {
 };
 
 export function applyHeaderIdentity(header: HeaderIdentityInput): HeaderJson {
+  const methods = header.methods.map(method => withMethodId(header.file, method));
+
   return {
     ...header,
     classes: header.classes.map(cls => withClassId(header.file, cls)),
-    methods: header.methods.map(method => withMethodId(header.file, method)),
+    methods: ensureUniqueMethodIds(header.file, methods),
   };
+}
+
+function ensureUniqueMethodIds(filePath: string, methods: MethodInfo[]): MethodInfo[] {
+  const counts = new Map<string, number>();
+  for (const method of methods) {
+    counts.set(method.id, (counts.get(method.id) ?? 0) + 1);
+  }
+
+  return methods.map(method => {
+    if ((counts.get(method.id) ?? 0) === 1) {
+      return method;
+    }
+
+    return {
+      ...method,
+      id: buildMethodIdWithLocation(filePath, method),
+    };
+  });
 }

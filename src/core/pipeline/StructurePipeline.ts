@@ -386,10 +386,12 @@ export class StructurePipeline implements IStructurePipeline {
     const { insights, rawResponse, prompt, rawStdout } = await this.llmProvider.generateFileInsights(methods, header.lang);
 
     let updated = false;
+    const appliedInsights: Array<{ id: string; name: string; insight: string }> = [];
     for (const { methodId, insight } of insights) {
       const target = normalizedHeader.methods.find(hm => hm.id === methodId);
       if (target && insight) {
         target.insight = insight;
+        appliedInsights.push({ id: methodId, name: target.name, insight });
         updated = true;
       }
     }
@@ -425,7 +427,7 @@ export class StructurePipeline implements IStructurePipeline {
     return {
       file: filePath,
       sentCount: methods.length,
-      methods: insights.map(insight => ({ id: insight.methodId, name: insight.methodName, insight: insight.insight })),
+      methods: appliedInsights,
       rawResponse,
       prompt,
       rawStdout,

@@ -110,6 +110,7 @@ export class JavaScriptParser extends BaseLanguageParser {
             loc: this.locString(decl),
             sig: `${exportPrefix}${keyword} ${asyncPrefix}${name} = ${paramStr} => ...`,
             refs: this.extractCallRefs(value, content),
+            stateRefs: this.extractStateReferences(value, content),
           });
         }
       }
@@ -149,6 +150,7 @@ export class JavaScriptParser extends BaseLanguageParser {
         loc: this.locString(assign.parent?.type === 'expression_statement' ? assign.parent : assign),
         sig: `${objName}.${propName} = ${asyncPrefix}function${paramStr}`,
         refs: body ? this.extractCallRefs(body, content) : [],
+        stateRefs: body ? this.extractStateReferences(body, content) : [],
       });
     }
 
@@ -198,6 +200,7 @@ export class JavaScriptParser extends BaseLanguageParser {
           loc: this.locString(call.parent?.type === 'expression_statement' ? call.parent : call),
           sig: `function ${name}${paramStr}`,
           refs: body ? this.extractCallRefs(body, content) : [],
+          stateRefs: body ? this.extractStateReferences(body, content) : [],
         });
       }
     }
@@ -233,12 +236,14 @@ export class JavaScriptParser extends BaseLanguageParser {
     parts.push(`${name}${paramStr}`);
 
     const refs = body ? this.extractCallRefs(body, content) : [];
+    const stateRefs = body ? this.extractStateReferences(body, content) : [];
 
     const method: ParsedMethodInfo = {
       name,
       loc: this.locString(node),
       sig: parts.join(' '),
       refs,
+      stateRefs,
     };
 
     if (className) method.class = className;
@@ -271,6 +276,7 @@ export class JavaScriptParser extends BaseLanguageParser {
       loc: this.locString(node),
       sig: parts.join(' '),
       refs: body ? this.extractCallRefs(body, content) : [],
+      stateRefs: body ? this.extractStateReferences(body, content) : [],
     };
   }
 

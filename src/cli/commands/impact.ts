@@ -1,6 +1,6 @@
 import { Container } from '../../core/Container';
 import { ImpactReport, TestCandidate } from '../../core/services/ImpactService';
-import { MemoryRecord, TraceRelation } from '../../core/interfaces/types';
+import { MemoryRecord, StateReference, TraceRelation } from '../../core/interfaces/types';
 import { colors } from '../utils/colors';
 
 export async function impactCommand(target: string): Promise<void> {
@@ -37,6 +37,7 @@ function printImpactReport(report: ImpactReport): void {
   printRelations('Callees', report.callees);
   printRelations('Trace', report.trace);
   printRelations('Same file symbols', report.sameFileSymbols);
+  printStateRefs(report.stateReferences);
   printTests(report.possibleTests);
   printMemories(report.memories);
 
@@ -54,6 +55,20 @@ function printImpactReport(report: ImpactReport): void {
     for (const next of report.suggestedNext) {
       console.log(colors.dim(`  ${next}`));
     }
+  }
+}
+
+function printStateRefs(refs: StateReference[]): void {
+  console.log('');
+  console.log(colors.bold('State references'));
+  if (refs.length === 0) {
+    console.log(colors.dim('  none'));
+    return;
+  }
+
+  for (const ref of refs) {
+    const symbol = ref.symbol ? colors.dim(` in ${ref.symbol}`) : '';
+    console.log(`  ${ref.path} ${colors.dim(`${ref.file} [${ref.range}] (${ref.kind})`)}${symbol}`);
   }
 }
 

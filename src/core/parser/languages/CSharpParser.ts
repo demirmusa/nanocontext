@@ -149,12 +149,14 @@ export class CSharpParser extends BaseLanguageParser {
     parts.push(`${name}${paramStr}`);
 
     const refs = body ? this.extractCSharpCallRefs(body, content) : [];
+    const stateRefs = body ? this.extractStateReferences(body, content) : [];
 
     const method: ParsedMethodInfo = {
       name,
       loc: this.locString(node),
       sig: parts.join(' '),
       refs,
+      stateRefs,
     };
 
     if (className) method.class = className;

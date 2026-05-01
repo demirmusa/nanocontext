@@ -30,6 +30,7 @@ export interface MethodInfo {
   loc: string;
   sig: string;
   refs: string[];
+  stateRefs?: StateReferenceInfo[];
   decorators?: string[];
   namespace?: string;
   visibility?: string;
@@ -52,6 +53,22 @@ export interface SymbolIndexMetadata {
   returnType?: string;
   extends?: string;
   implements?: string[];
+}
+
+export type StateReferenceKind = 'read' | 'write';
+
+export interface StateReferenceInfo {
+  path: string;
+  range: string;
+  kind: StateReferenceKind;
+  context?: string;
+}
+
+export interface StateReference extends StateReferenceInfo {
+  file: string;
+  symbol?: string;
+  symbolId?: string;
+  generationId?: string;
 }
 
 export interface VectorRecord {

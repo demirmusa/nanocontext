@@ -1,7 +1,7 @@
 import { IConfigManager } from '../interfaces/IConfigManager';
 import { IHeaderStore } from '../interfaces/IHeaderStore';
 import { IStateStore } from '../interfaces/IStateStore';
-import { MethodInfo, SearchResult, TraceRelation, TraceSurfaceResult } from '../interfaces/types';
+import { MethodInfo, SearchResult, StateReference, TraceRelation, TraceSurfaceResult } from '../interfaces/types';
 import { applyHeaderIdentity } from '../identity/recordIds';
 import { normalizeProjectPath } from '../../utils/projectPath';
 import { CodeReadService } from './CodeReadService';
@@ -53,6 +53,18 @@ export class DependencyService {
     const resolved = await this.resolveSymbol(symbol);
     if (!resolved) return [];
     return this.getRefs(resolved.file, resolved.selector, depth);
+  }
+
+  async getStateReferences(query?: string, kind?: 'read' | 'write', limit: number = 50): Promise<StateReference[]> {
+    return this.stateStore.listStateReferences?.(query, kind, limit) ?? [];
+  }
+
+  async getStateReaders(query: string, limit?: number): Promise<StateReference[]> {
+    return this.getStateReferences(query, 'read', limit);
+  }
+
+  async getStateWriters(query: string, limit?: number): Promise<StateReference[]> {
+    return this.getStateReferences(query, 'write', limit);
   }
 
   async getCallers(symbol: string): Promise<TraceSurfaceResult> {
@@ -398,8 +410,10 @@ export class DependencyService {
     importContext: ImportContext,
   ): ResolvedMethod {
     const candidateSymbol = method.class ? `${method.class}#${method.name}` : method.name;
-    const importAware = importContext.preferredFiles.has(file) || importContext.importedNames.has(method.class ?? '') || importContext.importedNames.has(method.name);
-    const score = scoreMethodMatch(method, selector, candidate, directMatch) + (importAware ? 25 : 0);
+    const preferredFile = importContext.preferredFiles.has(file);
+    const importedName = importContext.importedNames.has(method.class ?? '') || importContext.importedNames.has(method.name);
+    const importAware = preferredFile || importedName;
+    const score = scoreMethodMatch(method, selector, candidate, directMatch) + (preferredFile ? 50 : importedName ? 25 : 0);
     return {
       file,
       method,

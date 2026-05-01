@@ -17,6 +17,7 @@ import { filesCommand } from './commands/files';
 import { refsCommand } from './commands/refs';
 import { callersCommand } from './commands/callers';
 import { calleesCommand } from './commands/callees';
+import { readersCommand, stateRefsCommand, writersCommand } from './commands/state-refs';
 import { traceCommand } from './commands/trace';
 import { clearCommand } from './commands/clear';
 import { impactCommand } from './commands/impact';
@@ -162,7 +163,27 @@ program
   .command('refs <symbol>')
   .description('Show direct refs/callees for a symbol')
   .option('-d, --depth <number>', 'Trace depth')
+  .option('--state', 'Show indexed state/property references')
   .action(refsCommand);
+
+program
+  .command('state-refs [query]')
+  .description('Show indexed state/property references')
+  .option('--kind <kind>', 'Filter by read or write')
+  .option('-l, --limit <number>', 'Max results', '50')
+  .action(stateRefsCommand);
+
+program
+  .command('readers <statePath>')
+  .description('Show readers for a state/property path')
+  .option('-l, --limit <number>', 'Max results', '50')
+  .action(readersCommand);
+
+program
+  .command('writers <statePath>')
+  .description('Show writers for a state/property path')
+  .option('-l, --limit <number>', 'Max results', '50')
+  .action(writersCommand);
 
 program
   .command('callers <symbol>')

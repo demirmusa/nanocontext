@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import * as path from 'path';
 import * as fs from 'fs';
 import { IStateStore } from '../interfaces/IStateStore';
-import { InsightQueueItem, SearchResult, SymbolIndexMetadata } from '../interfaces/types';
+import { InsightQueueItem, SearchResult, StateReference, SymbolIndexMetadata } from '../interfaces/types';
 
 export class SqliteStateStore implements IStateStore {
   private db: Database.Database | null = null;
@@ -80,6 +80,22 @@ export class SqliteStateStore implements IStateStore {
         sig,
         insight
       );
+
+      CREATE TABLE IF NOT EXISTS state_references (
+        id TEXT PRIMARY KEY,
+        file TEXT NOT NULL,
+        path TEXT NOT NULL,
+        range TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        symbol TEXT,
+        symbol_id TEXT,
+        context TEXT,
+        generation_id TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_state_references_path ON state_references(path);
+      CREATE INDEX IF NOT EXISTS idx_state_references_kind ON state_references(kind);
+      CREATE INDEX IF NOT EXISTS idx_state_references_file ON state_references(file);
     `);
 
     this.migrateInsightQueue();
@@ -132,6 +148,7 @@ export class SqliteStateStore implements IStateStore {
     this.db!.prepare('DELETE FROM insight_queue WHERE file = ?').run(filePath);
     this.db!.prepare('DELETE FROM search_index WHERE file = ?').run(filePath);
     this.db!.prepare('DELETE FROM search_index_fts WHERE file = ?').run(filePath);
+    this.db!.prepare('DELETE FROM state_references WHERE file = ?').run(filePath);
   }
 
   private migrateSearchIndexColumns(): void {
@@ -262,6 +279,57 @@ export class SqliteStateStore implements IStateStore {
   removeFileIndex(file: string): void {
     this.db!.prepare('DELETE FROM search_index WHERE file = ?').run(file);
     this.db!.prepare('DELETE FROM search_index_fts WHERE file = ?').run(file);
+    this.db!.prepare('DELETE FROM state_references WHERE file = ?').run(file);
+  }
+
+  indexStateReference(reference: StateReference): void {
+    const id = [
+      reference.file,
+      reference.path,
+      reference.range,
+      reference.kind,
+      reference.symbolId ?? reference.symbol ?? '',
+    ].join(':');
+    this.db!.prepare(
+      `INSERT OR REPLACE INTO state_references
+       (id, file, path, range, kind, symbol, symbol_id, context, generation_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      reference.file,
+      reference.path,
+      reference.range,
+      reference.kind,
+      reference.symbol ?? null,
+      reference.symbolId ?? null,
+      reference.context ?? null,
+      reference.generationId ?? null,
+    );
+  }
+
+  listStateReferences(query?: string, kind?: 'read' | 'write', limit: number = 50): StateReference[] {
+    const clauses: string[] = [];
+    const args: unknown[] = [];
+    if (query?.trim()) {
+      clauses.push('(path = ? OR path LIKE ? OR symbol LIKE ? OR file LIKE ?)');
+      args.push(query.trim(), `%${query.trim()}%`, `%${query.trim()}%`, `%${query.trim()}%`);
+    }
+    if (kind) {
+      clauses.push('kind = ?');
+      args.push(kind);
+    }
+    args.push(limit);
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.db!.prepare(
+      `SELECT file, path, range, kind, symbol, symbol_id, context, generation_id
+       FROM state_references
+       ${where}
+       ORDER BY file ASC, range ASC, path ASC
+       LIMIT ?`
+    ).all(...args) as StateReferenceRow[];
+
+    return rows.map(mapStateReferenceRow);
   }
 
   searchExact(query: string, limit: number = 20): SearchResult[] {
@@ -336,6 +404,7 @@ export class SqliteStateStore implements IStateStore {
     this.db!.exec('DELETE FROM scan_stats');
     this.db!.exec('DELETE FROM search_index');
     this.db!.exec('DELETE FROM search_index_fts');
+    this.db!.exec('DELETE FROM state_references');
   }
 
   close(): void {
@@ -411,6 +480,30 @@ interface SearchIndexRow {
   implements: string | null;
   imports: string | null;
   exports: string | null;
+}
+
+interface StateReferenceRow {
+  file: string;
+  path: string;
+  range: string;
+  kind: string;
+  symbol: string | null;
+  symbol_id: string | null;
+  context: string | null;
+  generation_id: string | null;
+}
+
+function mapStateReferenceRow(row: StateReferenceRow): StateReference {
+  return {
+    file: row.file,
+    path: row.path,
+    range: row.range,
+    kind: row.kind === 'write' ? 'write' : 'read',
+    symbol: row.symbol ?? undefined,
+    symbolId: row.symbol_id ?? undefined,
+    context: row.context ?? undefined,
+    generationId: row.generation_id ?? undefined,
+  };
 }
 
 function searchIndexSelectColumns(alias?: string): string {

@@ -16,13 +16,13 @@ test('forget command help keeps the id argument optional', () => {
   assert.match(output, /--before <date>/);
 });
 
-test('cli help exposes header, peek, and open read primitives', () => {
+test('cli help exposes header, peek, and get read primitives', () => {
   const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
   const output = execFileSync(process.execPath, [cliPath, '--help'], { encoding: 'utf-8' });
 
   assert.match(output, /\bheader\b/);
   assert.match(output, /\bpeek\b/);
-  assert.match(output, /\bopen\b/);
+  assert.match(output, /\bget\b/);
   assert.match(output, /\bsymbol\b/);
   assert.match(output, /\bfiles\b/);
   assert.match(output, /\brefs\b/);

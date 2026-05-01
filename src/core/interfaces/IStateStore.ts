@@ -1,4 +1,4 @@
-import { InsightQueueItem, SearchResult, SymbolIndexMetadata } from './types';
+import { InsightQueueItem, SearchResult, StateReference, SymbolIndexMetadata } from './types';
 
 export interface IStateStore {
   initialize(): Promise<void>;
@@ -23,6 +23,8 @@ export interface IStateStore {
   searchExact(query: string, limit?: number): SearchResult[];
   searchLexical?(query: string, limit?: number): SearchResult[];
   searchRegex(pattern: string, limit?: number): SearchResult[];
+  indexStateReference?(reference: StateReference): void;
+  listStateReferences?(query?: string, kind?: 'read' | 'write', limit?: number): StateReference[];
 
   // Stats
   getStats(): { totalFiles: number; totalMethods: number; lastScanAt: string | null };

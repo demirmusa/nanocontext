@@ -5,7 +5,7 @@ import { IStateStore } from '../interfaces/IStateStore';
 import { IMemoryStore } from '../interfaces/IMemoryStore';
 import { CodeReadService } from './CodeReadService';
 import { DependencyService } from './DependencyService';
-import { MemoryRecord, TraceRelation } from '../interfaces/types';
+import { MemoryRecord, StateReference, TraceRelation } from '../interfaces/types';
 import { normalizeProjectPath } from '../../utils/projectPath';
 
 export interface ImpactReport {
@@ -21,6 +21,7 @@ export interface ImpactReport {
   callees: TraceRelation[];
   trace: TraceRelation[];
   sameFileSymbols: TraceRelation[];
+  stateReferences: StateReference[];
   possibleTests: TestCandidate[];
   memories: MemoryRecord[];
   warnings: string[];
@@ -69,6 +70,9 @@ export class ImpactService {
     const methods = header?.methods.slice(0, 5) ?? [];
     const callers = await this.collectSymbolRelations(methods.map(method => method.class ? `${method.class}#${method.name}` : method.name), 'callers');
     const callees = await this.collectSymbolRelations(methods.map(method => method.class ? `${method.class}#${method.name}` : method.name), 'callees');
+    const stateReferences = (this.stateStore.listStateReferences?.(file, undefined, 50) ?? [])
+      .filter(ref => ref.file === file)
+      .slice(0, 12);
 
     return {
       query: target,
@@ -77,6 +81,7 @@ export class ImpactService {
       callees,
       trace: [],
       sameFileSymbols: this.sameFileSymbols(file, header?.methods.map(method => method.loc) ?? []),
+      stateReferences,
       possibleTests: this.findPossibleTests(file, header?.methods.map(method => method.name) ?? []),
       memories: await this.memoryStore.listByFile(file),
       warnings,
@@ -107,6 +112,9 @@ export class ImpactService {
     const symbolId = `${matched.file}:${matched.loc}:${matched.type}:${matched.symbol}`;
     const symbolMemories = await this.memoryStore.listBySymbol(symbolId);
     const fileMemories = symbolMemories.length > 0 ? [] : await this.memoryStore.listByFile(matched.file);
+    const stateReferences = (this.stateStore.listStateReferences?.(symbol, undefined, 50) ?? [])
+      .filter(ref => ref.symbol === symbol || ref.file === matched.file)
+      .slice(0, 12);
 
     return {
       query: target,
@@ -121,6 +129,7 @@ export class ImpactService {
       callees: calleesSurface.results,
       trace: traceSurface.results,
       sameFileSymbols: this.sameFileSymbols(matched.file, [matched.loc]),
+      stateReferences,
       possibleTests: this.findPossibleTests(matched.file, [symbol, matched.symbol]),
       memories: [...symbolMemories, ...fileMemories].slice(0, 8),
       warnings,
@@ -208,6 +217,7 @@ export class ImpactService {
       callees: [],
       trace: [],
       sameFileSymbols: [],
+      stateReferences: [],
       possibleTests: [],
       memories: [],
       warnings,

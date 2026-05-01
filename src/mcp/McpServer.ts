@@ -178,6 +178,22 @@ export class McpServer {
             return json(await this.container.dependencyService.getCallers(args?.symbol as string));
           }
 
+          case 'state_refs': {
+            return json(await this.container.dependencyService.getStateReferences(
+              args?.q as string | undefined,
+              parseStateReferenceKind(args?.kind),
+              args?.n as number | undefined,
+            ));
+          }
+
+          case 'readers': {
+            return json(await this.container.dependencyService.getStateReaders(args?.q as string, args?.n as number | undefined));
+          }
+
+          case 'writers': {
+            return json(await this.container.dependencyService.getStateWriters(args?.q as string, args?.n as number | undefined));
+          }
+
           case 'callees': {
             return json(await this.container.dependencyService.getCallees(args?.symbol as string));
           }
@@ -264,4 +280,8 @@ export class McpServer {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
   }
+}
+
+function parseStateReferenceKind(value: unknown): 'read' | 'write' | undefined {
+  return value === 'read' || value === 'write' ? value : undefined;
 }

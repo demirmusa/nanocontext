@@ -192,6 +192,48 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
     },
   },
   {
+    name: 'state_refs',
+    description: 'Get indexed state/property references.',
+    params: '`q?`, `kind?`, `n?`',
+    docsDescription: 'Find property/state reads and writes such as `this.user`, `store.auth.token`, or `config.JwtIssuer`.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: 'Optional state/property path query' },
+        kind: { type: 'string', enum: ['read', 'write'], description: 'Optional read/write filter' },
+        n: { type: 'number', description: 'Max results' },
+      },
+    },
+  },
+  {
+    name: 'readers',
+    description: 'Get readers for a state/property path.',
+    params: '`q`, `n?`',
+    docsDescription: 'Find methods that read a state/property path.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: 'State/property path query' },
+        n: { type: 'number', description: 'Max results' },
+      },
+      required: ['q'],
+    },
+  },
+  {
+    name: 'writers',
+    description: 'Get writers for a state/property path.',
+    params: '`q`, `n?`',
+    docsDescription: 'Find methods that write a state/property path.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: 'State/property path query' },
+        n: { type: 'number', description: 'Max results' },
+      },
+      required: ['q'],
+    },
+  },
+  {
     name: 'callees',
     description: 'Get likely outbound calls for a symbol.',
     params: '`symbol`',

@@ -2,7 +2,7 @@
 import * as TreeSitter from 'web-tree-sitter';
 import * as path from 'path';
 import { ILanguageParser } from '../interfaces/IParser';
-import { ParsedFile, ParsedClassInfo, ParsedMethodInfo } from '../interfaces/types';
+import { ParsedFile, ParsedClassInfo, ParsedMethodInfo, StateReferenceInfo } from '../interfaces/types';
 
 type SyntaxNode = any;
 type TreeSitterParser = any;
@@ -110,4 +110,57 @@ export abstract class BaseLanguageParser implements ILanguageParser {
     }
     return Array.from(refs);
   }
+
+  protected extractStateReferences(node: SyntaxNode, content: string): StateReferenceInfo[] {
+    const text = this.nodeText(node, content);
+    const refs = new Map<string, StateReferenceInfo>();
+    const lineStarts = buildLineStarts(text);
+    const pathPattern = /\b(?:this|props|state|store|config|settings|options|[A-Z][A-Za-z0-9_]*Config)\??(?:\.[A-Za-z_$][\w$]*)+\b/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = pathPattern.exec(text)) !== null) {
+      const path = match[0].replace(/\?\./g, '.');
+      const after = text.slice(match.index + match[0].length);
+      if (/^\s*\(/.test(after)) {
+        continue;
+      }
+
+      const line = node.startPosition.row + findLineForIndex(lineStarts, match.index) + 1;
+      const kind = /^\s*(?:\+\+|--|\?\?=|\|\|=|&&=|[+\-*/%]?=(?!=|>))/.test(after) ? 'write' : 'read';
+      const key = `${path}:${line}:${kind}`;
+      if (!refs.has(key)) {
+        refs.set(key, {
+          path,
+          range: `${line}-${line}`,
+          kind,
+          context: extractLineAt(text, match.index).trim(),
+        });
+      }
+    }
+
+    return Array.from(refs.values());
+  }
+}
+
+function buildLineStarts(text: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\n') starts.push(i + 1);
+  }
+  return starts;
+}
+
+function findLineForIndex(starts: number[], index: number): number {
+  let line = 0;
+  for (let i = 0; i < starts.length; i++) {
+    if (starts[i] > index) break;
+    line = i;
+  }
+  return line;
+}
+
+function extractLineAt(text: string, index: number): string {
+  const start = text.lastIndexOf('\n', index) + 1;
+  const end = text.indexOf('\n', index);
+  return text.slice(start, end === -1 ? undefined : end);
 }

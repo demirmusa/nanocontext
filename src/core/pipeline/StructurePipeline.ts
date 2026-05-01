@@ -71,6 +71,15 @@ export class StructurePipeline implements IStructurePipeline {
         parameters: method.parameters,
         returnType: method.returnType,
       });
+      for (const stateRef of method.stateRefs ?? []) {
+        this.stateStore.indexStateReference?.({
+          ...stateRef,
+          file: filePath,
+          symbol: method.class ? `${method.class}#${method.name}` : method.name,
+          symbolId: method.id,
+          generationId,
+        });
+      }
     }
     for (const cls of header.classes) {
       cls.namespace = cls.namespace ?? header.namespace;
@@ -395,6 +404,15 @@ export class StructurePipeline implements IStructurePipeline {
           parameters: method.parameters,
           returnType: method.returnType,
         });
+        for (const stateRef of method.stateRefs ?? []) {
+          this.stateStore.indexStateReference?.({
+            ...stateRef,
+            file: filePath,
+            symbol: method.class ? `${method.class}#${method.name}` : method.name,
+            symbolId: method.id,
+            generationId: normalizedHeader.generationId,
+          });
+        }
       }
     }
 

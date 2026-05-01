@@ -123,6 +123,7 @@ export class TypeScriptParser extends BaseLanguageParser {
             loc: this.locString(decl),
             sig: `${exportPrefix}${keyword} ${asyncPrefix}${name} = ${paramStr}${retStr} => ...`,
             refs: this.extractCallRefs(value, content),
+            stateRefs: this.extractStateReferences(value, content),
           });
         }
       }
@@ -179,12 +180,14 @@ export class TypeScriptParser extends BaseLanguageParser {
     parts.push(`${name}${paramStr}${retStr}`);
 
     const refs = body ? this.extractCallRefs(body, content) : [];
+    const stateRefs = body ? this.extractStateReferences(body, content) : [];
 
     const method: ParsedMethodInfo = {
       name,
       loc: this.locString(node),
       sig: parts.join(' '),
       refs,
+      stateRefs,
     };
 
     if (className) method.class = className;
@@ -222,6 +225,7 @@ export class TypeScriptParser extends BaseLanguageParser {
       loc: this.locString(node),
       sig: parts.join(' '),
       refs: body ? this.extractCallRefs(body, content) : [],
+      stateRefs: body ? this.extractStateReferences(body, content) : [],
     };
   }
 

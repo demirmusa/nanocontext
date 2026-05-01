@@ -63,7 +63,7 @@ test('dependency service returns callers and trace steps for a symbol', async ()
   assert.equal(trace.results.length, 3);
   assert.equal(trace.results[0].symbol, 'entry');
   assert.equal(trace.results[1].symbol, 'stepA');
-  assert.match(trace.suggestedNext, /nc open stepA/);
+  assert.match(trace.suggestedNext, /nc get stepA/);
 });
 
 test('dependency service returns ranked candidates and explicit missing-index guidance', async () => {

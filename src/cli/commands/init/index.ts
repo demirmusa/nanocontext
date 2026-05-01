@@ -122,9 +122,6 @@ async function ensureMissingSteps(container: Container, cwd: string, options: In
 
   const nonInteractive = hasNonInteractiveOptions(options);
 
-<<<<<<< Updated upstream
-  const setupResult = container.agentSetupService.applySetup(cwd, await selectAgents(container), interactionMode as 'mcp' | 'cli');
-=======
   const interactionMode = nonInteractive && options.mode
     ? options.mode
     : await select({
@@ -140,7 +137,6 @@ async function ensureMissingSteps(container: Container, cwd: string, options: In
     : await selectAgents(container);
   const ensureMode = interactionMode as 'mcp' | 'cli';
   const setupResult = container.agentSetupService.applySetup(cwd, ensureAgents, ensureMode);
->>>>>>> Stashed changes
   logAgentSetupResult(setupResult);
   fixed += setupResult.createdMcpConfigs.length + setupResult.removedMcpConfigs.length + setupResult.updatedAgentDocs.length;
 

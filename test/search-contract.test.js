@@ -206,6 +206,78 @@ test('search engine honors type filters and final limits', async () => {
   assert.deepEqual(allResults.map(result => result.id ?? result.text), ['method:1', 'mem_1']);
 });
 
+test('search engine combines exact lexical regex vector and memory signals with exact boosts', async () => {
+  const searchEngine = new SearchEngine(
+    {
+      initialize: async () => {},
+      upsert: async () => {},
+      remove: async () => {},
+      removeByFile: async () => {},
+      search: async () => [
+        { type: 'method', id: 'semantic:generic', file: 'src/generic.ts', method: 'render', loc: '1-5', score: 0.05 },
+        { type: 'method', id: 'method:target', file: 'src/auth/AuthService.ts', class: 'AuthService', method: 'issueToken', loc: '20-30', sig: 'issueToken(userId: string)', score: 0.35 },
+      ],
+      clear: async () => {},
+      count: async () => 0,
+    },
+    {
+      name: 'fake',
+      dimensions: 1,
+      embed: async () => [0],
+    },
+    {
+      read: async () => null,
+      write: async () => {},
+      remove: async () => {},
+      exists: () => false,
+      getHeaderPath: () => '',
+    },
+    {
+      add: async () => { throw new Error('not used'); },
+      list: async () => [{ id: 'mem_auth', text: 'issue token uses AuthService', createdAt: '2026-01-01T00:00:00.000Z', file: 'src/auth/AuthService.ts' }],
+      listByFile: async () => [],
+      listBySymbol: async () => [],
+      remove: async () => false,
+      removeBefore: async () => 0,
+      findSimilar: async () => [{ id: 'mem_auth', text: 'issue token uses AuthService', createdAt: '2026-01-01T00:00:00.000Z', file: 'src/auth/AuthService.ts' }],
+      close: () => {},
+    },
+    {
+      initialize: async () => {},
+      getChecksum: () => null,
+      listTrackedFiles: () => [],
+      setChecksum: () => {},
+      removeFile: () => {},
+      enqueueInsight: () => {},
+      dequeueInsight: () => [],
+      completeInsight: () => {},
+      failInsight: () => {},
+      getPendingInsightCount: () => 0,
+      isInsightPending: () => false,
+      indexMethod: () => {},
+      indexClass: () => {},
+      removeFileIndex: () => {},
+      searchExact: () => [{ type: 'method', id: 'method:target', file: 'src/auth/AuthService.ts', class: 'AuthService', method: 'issueToken', loc: '20-30', sig: 'issueToken(userId: string)' }],
+      searchLexical: () => [{ type: 'method', id: 'method:target', file: 'src/auth/AuthService.ts', class: 'AuthService', method: 'issueToken', loc: '20-30', sig: 'issueToken(userId: string)', score: 0.9 }],
+      searchRegex: () => [{ type: 'method', id: 'method:target', file: 'src/auth/AuthService.ts', class: 'AuthService', method: 'issueToken', loc: '20-30', sig: 'issueToken(userId: string)' }],
+      getStats: () => ({ totalFiles: 0, totalMethods: 0, lastScanAt: null }),
+      setLastScanAt: () => {},
+      setTotalMethods: () => {},
+      clearAll: () => {},
+      close: () => {},
+    },
+    logger,
+    5,
+  );
+
+  const results = await searchEngine.search('AuthService issueToken', 3);
+  assert.equal(results[0].id, 'method:target');
+  assert.match(results[0].matchReason, /signals=exact\+lexical\+regex\+vector/);
+  assert.equal(typeof results[0].score, 'number');
+  assert.equal(results.filter(result => result.id === 'method:target').length, 1);
+  assert.ok(results.some(result => result.type === 'memory'));
+});
+
 test('regex deep enriches shallow regex hits with header data', async () => {
   const header = applyHeaderIdentity({
     file: 'src/example.ts',

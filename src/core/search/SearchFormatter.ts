@@ -66,6 +66,7 @@ export class SearchFormatter {
         class: r.class,
         loc: r.loc,
         sig: r.sig,
+        score: r.score,
         refs: r.refs,
         insight: r.insight,
         text: r.text,

@@ -58,9 +58,20 @@ export class SqliteStateStore implements IStateStore {
         loc TEXT,
         insight TEXT
       );
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS search_index_fts USING fts5(
+        id UNINDEXED,
+        type UNINDEXED,
+        file,
+        name,
+        class,
+        sig,
+        insight
+      );
     `);
 
     this.migrateInsightQueue();
+    this.rebuildSearchFts();
   }
 
   private migrateInsightQueue(): void {
@@ -107,6 +118,7 @@ export class SqliteStateStore implements IStateStore {
     this.db!.prepare('DELETE FROM file_checksums WHERE file_path = ?').run(filePath);
     this.db!.prepare('DELETE FROM insight_queue WHERE file = ?').run(filePath);
     this.db!.prepare('DELETE FROM search_index WHERE file = ?').run(filePath);
+    this.db!.prepare('DELETE FROM search_index_fts WHERE file = ?').run(filePath);
   }
 
   enqueueInsight(item: InsightQueueItem): void {
@@ -161,16 +173,19 @@ export class SqliteStateStore implements IStateStore {
     this.db!.prepare(
       'INSERT OR REPLACE INTO search_index (id, type, file, name, class, sig, loc, insight) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(id, 'method', file, name, className ?? null, sig, loc, insight ?? null);
+    this.indexFts(id, 'method', file, name, className, sig, insight);
   }
 
   indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined): void {
     this.db!.prepare(
       'INSERT OR REPLACE INTO search_index (id, type, file, name, class, sig, loc, insight) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(id, 'class', file, name, name, null, loc, insight ?? null);
+    this.indexFts(id, 'class', file, name, name, undefined, insight);
   }
 
   removeFileIndex(file: string): void {
     this.db!.prepare('DELETE FROM search_index WHERE file = ?').run(file);
+    this.db!.prepare('DELETE FROM search_index_fts WHERE file = ?').run(file);
   }
 
   searchExact(query: string, limit: number = 20): SearchResult[] {
@@ -194,6 +209,42 @@ export class SqliteStateStore implements IStateStore {
       loc: r.loc ?? undefined,
       insight: r.insight ?? undefined,
     }));
+  }
+
+  searchLexical(query: string, limit: number = 20): SearchResult[] {
+    const ftsQuery = buildFtsQuery(query);
+    if (!ftsQuery) {
+      return [];
+    }
+
+    try {
+      const rows = this.db!.prepare(
+        `SELECT si.id, si.type, si.file, si.name, si.class, si.sig, si.loc, si.insight,
+                bm25(search_index_fts, 1.5, 3.0, 2.0, 1.2, 1.0) AS rank
+         FROM search_index_fts
+         JOIN search_index si ON si.id = search_index_fts.id
+         WHERE search_index_fts MATCH ?
+         ORDER BY rank ASC
+         LIMIT ?`
+      ).all(ftsQuery, limit) as Array<{
+        id: string; type: string; file: string; name: string; class: string | null;
+        sig: string | null; loc: string | null; insight: string | null; rank: number;
+      }>;
+
+      return rows.map(r => ({
+        id: r.id,
+        type: r.type as 'method' | 'class',
+        file: r.file,
+        method: r.type === 'method' ? r.name : undefined,
+        class: r.class ?? undefined,
+        sig: r.sig ?? undefined,
+        loc: r.loc ?? undefined,
+        insight: r.insight ?? undefined,
+        score: normalizeFtsRank(r.rank),
+      }));
+    } catch {
+      return this.searchExact(query, limit);
+    }
   }
 
   searchRegex(pattern: string, limit: number = 20): SearchResult[] {
@@ -242,10 +293,57 @@ export class SqliteStateStore implements IStateStore {
     this.db!.exec('DELETE FROM insight_queue');
     this.db!.exec('DELETE FROM scan_stats');
     this.db!.exec('DELETE FROM search_index');
+    this.db!.exec('DELETE FROM search_index_fts');
   }
 
   close(): void {
     this.db?.close();
     this.db = null;
   }
+
+  private indexFts(
+    id: string,
+    type: 'method' | 'class',
+    file: string,
+    name: string,
+    className: string | undefined,
+    sig: string | undefined,
+    insight: string | undefined,
+  ): void {
+    this.db!.prepare('DELETE FROM search_index_fts WHERE id = ?').run(id);
+    this.db!.prepare(
+      'INSERT INTO search_index_fts (id, type, file, name, class, sig, insight) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, type, file, name, className ?? null, sig ?? null, insight ?? null);
+  }
+
+  private rebuildSearchFts(): void {
+    const ftsCount = this.db!.prepare('SELECT COUNT(*) as count FROM search_index_fts').get() as { count: number };
+    const indexCount = this.db!.prepare('SELECT COUNT(*) as count FROM search_index').get() as { count: number };
+    if (ftsCount.count === indexCount.count) {
+      return;
+    }
+
+    this.db!.exec('DELETE FROM search_index_fts');
+    this.db!.exec(`
+      INSERT INTO search_index_fts (id, type, file, name, class, sig, insight)
+      SELECT id, type, file, name, class, sig, insight FROM search_index
+    `);
+  }
+}
+
+function buildFtsQuery(query: string): string {
+  const terms = query
+    .split(/[^A-Za-z0-9_./#-]+/)
+    .map(term => term.trim())
+    .filter(term => term.length > 0)
+    .slice(0, 8);
+
+  return terms.map(term => `"${term.replace(/"/g, '""')}"`).join(' OR ');
+}
+
+function normalizeFtsRank(rank: number): number {
+  if (!Number.isFinite(rank)) {
+    return 0;
+  }
+  return 1 / (1 + Math.max(0, Math.abs(rank)));
 }

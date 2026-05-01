@@ -20,6 +20,7 @@ export interface IStateStore {
   indexClass(id: string, file: string, name: string, loc: string, insight: string | undefined): void;
   removeFileIndex(file: string): void;
   searchExact(query: string, limit?: number): SearchResult[];
+  searchLexical?(query: string, limit?: number): SearchResult[];
   searchRegex(pattern: string, limit?: number): SearchResult[];
 
   // Stats

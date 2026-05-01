@@ -7,6 +7,15 @@ import { IStateStore } from '../interfaces/IStateStore';
 import { ILogger } from '../interfaces/ILogger';
 import { SearchResult } from '../interfaces/types';
 
+type SearchSignal = 'exact' | 'lexical' | 'regex' | 'vector' | 'memory' | 'path';
+
+interface RankedCandidate {
+  result: SearchResult;
+  score: number;
+  signals: Set<SearchSignal>;
+  reasons: string[];
+}
+
 export class SearchEngine implements ISearchEngine {
   constructor(
     private vectorStore: IVectorStore,
@@ -19,33 +28,31 @@ export class SearchEngine implements ISearchEngine {
   ) {}
 
   async search(query: string, limit?: number, typeFilter?: string): Promise<SearchResult[]> {
-    const results: SearchResult[] = [];
     const maxResults = limit || this.defaultLimit;
+    const candidateLimit = Math.max(maxResults * 4, maxResults);
     const normalizedTypeFilter = typeFilter && typeFilter !== 'all' ? typeFilter : undefined;
-    const lexicalResults = normalizedTypeFilter === 'memory'
-      ? []
-      : [
-        ...this.stateStore.searchExact(query, maxResults),
-        ...this.stateStore.searchRegex(escapeRegex(query), maxResults),
-      ].map(result => ({
-        ...result,
-        score: lexicalBoostScore(query, result),
-      }));
+    const candidates = new Map<string, RankedCandidate>();
 
-    results.push(...lexicalResults);
+    if (normalizedTypeFilter !== 'memory') {
+      const exactResults = this.stateStore.searchExact(query, candidateLimit);
+      this.addRankedResults(candidates, query, exactResults, 'exact', 4.5);
+
+      const lexicalResults = this.stateStore.searchLexical?.(query, candidateLimit) ?? [];
+      this.addRankedResults(candidates, query, lexicalResults, 'lexical', 2.5);
+
+      const regexResults = this.stateStore.searchRegex(escapeRegex(query), candidateLimit);
+      this.addRankedResults(candidates, query, regexResults, 'regex', 1.7);
+    }
 
     if (normalizedTypeFilter !== 'memory' && this.embeddingProvider) {
       try {
         const queryVector = await this.embeddingProvider.embed(query);
         const vectorResults = await this.vectorStore.search(
           queryVector,
-          normalizedTypeFilter ? Math.max(maxResults * 3, maxResults) : Math.max(maxResults * 2, maxResults),
+          normalizedTypeFilter ? Math.max(candidateLimit, maxResults) : candidateLimit,
           normalizedTypeFilter ? { type: normalizedTypeFilter } : undefined,
         );
-        results.push(...vectorResults.map(result => ({
-          ...result,
-          score: lexicalBoostScore(query, result) + (typeof result.score === 'number' ? Math.max(0, 1 - result.score) : 0),
-        })));
+        this.addRankedResults(candidates, query, vectorResults, 'vector', 1.4);
       } catch (err) {
         this.logger.debug('Vector search skipped:', err instanceof Error ? err.message : String(err));
       }
@@ -53,35 +60,32 @@ export class SearchEngine implements ISearchEngine {
 
     if (!normalizedTypeFilter || normalizedTypeFilter === 'memory') {
       try {
-        const memories = await this.memoryStore.findSimilar(query, 0.7, maxResults);
+        const memories = await this.memoryStore.findSimilar(query, 0.7, candidateLimit);
         for (const mem of memories) {
-          results.push({
+          this.addRankedResults(candidates, query, [{
             type: 'memory',
             id: mem.id,
             text: mem.text,
             file: mem.file,
-            score: lexicalBoostScore(query, { text: mem.text, file: mem.file }),
-          });
+          }], 'memory', 1.6);
         }
         const lexicalMemories = await this.memoryStore.list(query);
         for (const mem of lexicalMemories) {
-          results.push({
+          this.addRankedResults(candidates, query, [{
             type: 'memory',
             id: mem.id,
             text: mem.text,
             file: mem.file,
-            score: lexicalBoostScore(query, { text: mem.text, file: mem.file }) + 1,
-          });
+          }], 'memory', 2.2);
         }
       } catch (err) {
         this.logger.error('Memory search failed:', err);
       }
     }
 
-    const filtered = normalizedTypeFilter
-      ? results.filter(result => result.type === normalizedTypeFilter)
-      : results;
-    return this.dedupeResults(filtered)
+    return Array.from(candidates.values())
+      .map(candidate => this.finalizeCandidate(query, candidate))
+      .filter(result => !normalizedTypeFilter || result.type === normalizedTypeFilter)
       .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
       .slice(0, maxResults);
   }
@@ -149,21 +153,48 @@ export class SearchEngine implements ISearchEngine {
     return this.stateStore.searchRegex(pattern, limit || this.defaultLimit);
   }
 
-  private dedupeResults(results: SearchResult[]): SearchResult[] {
-    const seen = new Set<string>();
-    const deduped: SearchResult[] = [];
-
+  private addRankedResults(
+    candidates: Map<string, RankedCandidate>,
+    query: string,
+    results: SearchResult[],
+    signal: SearchSignal,
+    weight: number,
+  ): void {
+    let rank = 0;
     for (const result of results) {
-      const key = result.type === 'memory'
-        ? `memory:${result.id ?? result.text ?? ''}`
-        : `${result.type}:${result.id ?? `${result.file ?? ''}:${result.method ?? result.class ?? ''}:${result.loc ?? ''}`}`;
+      rank++;
+      const key = buildResultKey(result);
+      const existing = candidates.get(key);
+      const directBoost = lexicalBoostScore(query, result);
+      const pathBoost = pathProximityScore(query, result.file);
+      const nativeScore = normalizeNativeScore(signal, result.score);
+      const signalScore = (weight / (60 + rank)) + directBoost + pathBoost + nativeScore + typePriorityScore(result);
+      const reasons = describeSignal(signal, directBoost, pathBoost, nativeScore);
 
-      if (seen.has(key)) continue;
-      seen.add(key);
-      deduped.push(result);
+      if (existing) {
+        existing.score += signalScore;
+        existing.signals.add(signal);
+        existing.reasons.push(...reasons);
+        existing.result = mergeResults(existing.result, result);
+        continue;
+      }
+
+      candidates.set(key, {
+        result: { ...result },
+        score: signalScore,
+        signals: new Set([signal]),
+        reasons,
+      });
     }
+  }
 
-    return deduped;
+  private finalizeCandidate(query: string, candidate: RankedCandidate): SearchResult {
+    const signals = Array.from(candidate.signals);
+    return {
+      ...candidate.result,
+      score: Number(candidate.score.toFixed(6)),
+      matchReason: buildMatchReason(query, signals, candidate.reasons),
+    };
   }
 }
 
@@ -191,4 +222,81 @@ function lexicalBoostScore(query: string, result: Pick<SearchResult, 'file' | 'm
   }
 
   return score;
+}
+
+function pathProximityScore(query: string, file: string | undefined): number {
+  if (!file) {
+    return 0;
+  }
+
+  const queryParts = tokenize(query);
+  if (queryParts.length === 0) {
+    return 0;
+  }
+
+  const fileParts = tokenize(file);
+  const matches = queryParts.filter(part => fileParts.includes(part)).length;
+  const directoryMatches = queryParts.filter(part => file.toLowerCase().includes(`/${part}/`) || file.toLowerCase().includes(`\\${part}\\`)).length;
+  return matches * 0.35 + directoryMatches * 0.35;
+}
+
+function tokenize(value: string): string[] {
+  return value.toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
+}
+
+function normalizeNativeScore(signal: SearchSignal, score: number | undefined): number {
+  if (!Number.isFinite(score)) {
+    return 0;
+  }
+  if (signal === 'vector') {
+    return Math.max(0, 1 - Math.max(0, score as number));
+  }
+  if (signal === 'lexical') {
+    return Math.max(0, score as number);
+  }
+  return Math.max(0, Math.min(score as number, 1));
+}
+
+function typePriorityScore(result: SearchResult): number {
+  return result.type === 'memory' ? 0 : 0.2;
+}
+
+function buildResultKey(result: SearchResult): string {
+  if (result.type === 'memory') {
+    return `memory:${result.id ?? result.text ?? ''}`;
+  }
+  return `${result.type}:${result.id ?? `${result.file ?? ''}:${result.class ?? ''}:${result.method ?? ''}:${result.loc ?? ''}`}`;
+}
+
+function describeSignal(signal: SearchSignal, directBoost: number, pathBoost: number, nativeScore: number): string[] {
+  const reasons: string[] = [signal];
+  if (directBoost > 0) {
+    reasons.push('exact/name/text boost');
+  }
+  if (pathBoost > 0) {
+    reasons.push('path/module proximity');
+  }
+  if (nativeScore > 0 && (signal === 'vector' || signal === 'lexical')) {
+    reasons.push(`${signal} score`);
+  }
+  return reasons;
+}
+
+function buildMatchReason(query: string, signals: string[], reasons: string[]): string {
+  return `Hybrid match for "${query}": ${Array.from(new Set(reasons)).join(', ')}; signals=${signals.join('+')}.`;
+}
+
+function mergeResults(primary: SearchResult, next: SearchResult): SearchResult {
+  return {
+    ...primary,
+    id: primary.id ?? next.id,
+    file: primary.file ?? next.file,
+    method: primary.method ?? next.method,
+    class: primary.class ?? next.class,
+    loc: primary.loc ?? next.loc,
+    sig: primary.sig ?? next.sig,
+    refs: primary.refs ?? next.refs,
+    insight: primary.insight ?? next.insight,
+    text: primary.text ?? next.text,
+  };
 }

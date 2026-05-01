@@ -139,9 +139,18 @@ export async function scanCommand(options: { resume?: boolean; rebuildVectors?: 
     }
 
     const stats = await container.indexService.scanProject((progress: ScanProgress) => {
+      // Collecting phase: show file discovery progress inline
+      if (progress.phase === 'collecting') {
+        const count = progress.totalFiles;
+        process.stdout.write(`\rCollecting files... ${count > 0 ? count : ''}`);
+        return;
+      }
+
       // Phase transition — print summary of previous phase
       if (progress.phase !== currentPhase) {
-        if (currentPhase && phaseSnapshot) {
+        if (currentPhase === 'collecting') {
+          process.stdout.write(`\rCollecting files... ${phaseSnapshot?.totalFiles ?? 0} found\n`);
+        } else if (currentPhase && phaseSnapshot) {
           display.printLine(phaseSummary(currentPhase, phaseSnapshot, display, runtimeConfig));
           if (verbose) {
             display.log(`[PHASE END] ${currentPhase} — ${phaseSnapshot.processedFiles}/${phaseSnapshot.totalFiles} files`);

@@ -20,7 +20,7 @@ interface InitCommandOptions {
   mode?: 'mcp' | 'cli';
   agents?: string;
   yes?: boolean;
-  setupOnly?: boolean;
+  agentSetup?: boolean;
 }
 
 export async function initCommand(options: InitCommandOptions = {}): Promise<void> {
@@ -28,7 +28,7 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<voi
   const container = new Container(cwd);
   const nonInteractive = hasNonInteractiveOptions(options);
 
-  if (options.setupOnly) {
+  if (options.agentSetup) {
     if (!container.projectInitService.isInitialized(cwd)) {
       console.log(colors.yellow('NanoContext is not initialized in this project. Run `nc init` first.'));
       return;

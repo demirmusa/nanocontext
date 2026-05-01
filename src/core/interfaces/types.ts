@@ -227,7 +227,7 @@ export interface ProjectConfig {
   version: number;
   languages: string[];
   include: string[];
-  exclude: string[];
+  exclude?: string[];
   aiInsight: boolean;
   aiInsightConcurrency: number;
   watch: { debounceMs: number };
@@ -297,7 +297,7 @@ export interface TraceSurfaceResult {
 }
 
 export interface ScanProgress {
-  phase: 'structure' | 'insight' | 'vectors';
+  phase: 'collecting' | 'structure' | 'insight' | 'vectors';
   totalFiles: number;
   processedFiles: number;
   totalMethods: number;

@@ -46,7 +46,7 @@ export class FileWatcher implements IFileWatcher {
     });
 
     // Merge exclude patterns from config, .gitignore, and .nanocontextignore
-    const ignorePatterns: string[] = [...config.exclude];
+    const ignorePatterns: string[] = [...(config.exclude ?? [])];
     ignorePatterns.push(...loadGitignorePatterns(projectRoot));
     const ignorePath = path.join(projectRoot, '.nanocontextignore');
     if (fs.existsSync(ignorePath)) {

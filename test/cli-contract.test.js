@@ -38,6 +38,14 @@ test('cli help exposes header, peek, and get read primitives', () => {
   assert.match(output, /\bremove\b/);
 });
 
+test('init help exposes agent setup flag', () => {
+  const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
+  const output = execFileSync(process.execPath, [cliPath, 'init', '--help'], { encoding: 'utf-8' });
+
+  assert.match(output, /--agent-setup/);
+  assert.doesNotMatch(output, /--setup-only/);
+});
+
 test('stop and resume toggle embedding config without losing provider settings', () => {
   const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocontext-embedding-toggle-'));

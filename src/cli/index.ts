@@ -53,7 +53,7 @@ program
   .option('--mode <mode>', 'Setup mode: mcp | cli')
   .option('--agents <ids>', 'Comma-separated agent ids (e.g. codex,claude)')
   .option('-y, --yes', 'Overwrite existing init config without prompting')
-  .option('--setup-only', 'Only update agent/mode setup, skip provider config prompts')
+  .option('--agent-setup', 'Only update agent/mode setup, skip provider config prompts')
   .action(initCommand);
 
 program

@@ -127,6 +127,7 @@ export class StructurePipeline implements IStructurePipeline {
     }
 
     // Collect files matching include patterns, excluding exclude patterns
+    onProgress?.({ phase: 'collecting', totalFiles: 0, processedFiles: 0, totalMethods: 0 });
     const allPatterns = [...config.include, ...deriveTextPatterns(config.include)];
     let files: string[] = [];
     for (const pattern of allPatterns) {
@@ -136,6 +137,7 @@ export class StructurePipeline implements IStructurePipeline {
         nodir: true,
       });
       files.push(...matched.map(file => normalizeProjectPath(file, projectRoot)));
+      onProgress?.({ phase: 'collecting', totalFiles: files.length, processedFiles: 0, totalMethods: 0 });
     }
 
     // Filter to only files we can parse

@@ -179,6 +179,7 @@ program
 program
   .command('stale')
   .description('Check whether the index is stale')
+  .option('--compact', 'Print compact agent-oriented output')
   .action(staleCommand);
 
 program

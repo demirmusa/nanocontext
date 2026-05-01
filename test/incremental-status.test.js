@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const { SqliteStateStore } = require('../dist/core/storage/SqliteStateStore');
 const { SyncService } = require('../dist/core/pipeline/SyncService');
+const { StaleService } = require('../dist/core/services/StaleService');
 const { createTempProject } = require('./helpers/project');
 
 const logger = {
@@ -127,4 +128,72 @@ test('sync service updates last scan time for unchanged incremental syncs', asyn
   const result = await syncService.syncFile(filePath);
   assert.equal(result.action, 'unchanged');
   assert.equal(events.length, 1);
+});
+
+test('stale service reports categorized index integrity issues with actions', async (t) => {
+  const projectRoot = createTempProject({
+    'src/example.ts': 'export function run() { return 2; }\n',
+    'src/readme.md': '# unsupported\n',
+  });
+  t.after(() => fs.rmSync(projectRoot, { recursive: true, force: true }));
+
+  const service = new StaleService(
+    {
+      getProjectRoot: () => projectRoot,
+      isInitialized: () => true,
+      loadProjectConfig: async () => ({
+        version: 1,
+        languages: ['typescript'],
+        include: ['src/**/*'],
+        exclude: [],
+        aiInsight: true,
+        aiInsightConcurrency: 1,
+        watch: { debounceMs: 100 },
+        search: { defaultLimit: 3, maxLimit: 20 },
+        dependencyDepth: 1,
+      }),
+      loadUserConfig: async () => ({ llm: { provider: 'none', model: 'disabled' }, embedding: { provider: 'none', model: 'disabled' } }),
+      saveProjectConfig: async () => {},
+      saveUserConfig: async () => {},
+      getDefaultProjectConfig: () => ({}),
+      getDefaultUserConfig: () => ({}),
+    },
+    {
+      exists: (file) => file === 'src/example.ts',
+      read: async (file) => file === 'src/example.ts'
+        ? {
+          file,
+          lang: 'typescript',
+          checksum: 'old',
+          imports: [],
+          exports: [],
+          classes: [],
+          methods: [{ id: 'method:run', name: 'run', loc: '1-1', sig: 'run()', refs: [] }],
+        }
+        : null,
+      write: async () => {},
+      remove: async () => {},
+      getHeaderPath: () => '',
+    },
+    {
+      listTrackedFiles: () => ['src/example.ts', 'src/missing.ts', 'src/readme.md'],
+      getChecksum: () => 'old-checksum',
+      getPendingInsightCount: () => 2,
+      getStats: () => ({ totalFiles: 3, totalMethods: 3, lastScanAt: null }),
+    },
+    {
+      count: async () => 1,
+    },
+  );
+
+  const report = await service.inspect();
+  assert.equal(report.ok, false);
+  assert.equal(report.stats.changedFiles, 2);
+  assert.equal(report.stats.missingFiles, 1);
+  assert.equal(report.stats.missingVectors, 2);
+  assert.equal(report.stats.staleInsights, 1);
+  assert.ok(report.categories.files.some(issue => issue.kind === 'changed-file' && issue.action.includes('nc')));
+  assert.ok(report.categories.vectors.some(issue => issue.kind === 'missing-vector'));
+  assert.ok(report.categories.parser.some(issue => issue.kind === 'unsupported-extension'));
+  assert.ok(report.categories.generation.some(issue => issue.kind === 'scan-generation-mismatch'));
 });

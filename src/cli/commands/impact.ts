@@ -1,5 +1,5 @@
 import { Container } from '../../core/Container';
-import { ImpactReport, TestCandidate } from '../../core/services/ImpactService';
+import { ImpactReport, PublicApiSymbol, TestCandidate } from '../../core/services/ImpactService';
 import { MemoryRecord, StateReference, TraceRelation } from '../../core/interfaces/types';
 import { colors } from '../utils/colors';
 
@@ -33,11 +33,14 @@ function printImpactReport(report: ImpactReport): void {
     console.log(colors.cyan(report.query));
   }
 
+  printRisk(report.riskLevel, report.riskReason);
   printRelations('Callers', report.callers);
   printRelations('Callees', report.callees);
   printRelations('Trace', report.trace);
   printRelations('Same file symbols', report.sameFileSymbols);
   printStateRefs(report.stateReferences);
+  printPublicApi(report.publicApiChanges);
+  printRelations('Related routes / controllers', report.relatedRoutes);
   printTests(report.possibleTests);
   printMemories(report.memories);
 
@@ -45,7 +48,15 @@ function printImpactReport(report: ImpactReport): void {
     console.log('');
     console.log(colors.dim('Warnings:'));
     for (const warning of report.warnings) {
-      console.log(colors.dim(`  ${warning}`));
+      console.log(colors.yellow(`  ${warning}`));
+    }
+  }
+
+  if (report.verificationCommands.length > 0) {
+    console.log('');
+    console.log(colors.bold('Verify'));
+    for (const cmd of report.verificationCommands) {
+      console.log(`  ${colors.dim(cmd)}`);
     }
   }
 
@@ -55,6 +66,26 @@ function printImpactReport(report: ImpactReport): void {
     for (const next of report.suggestedNext) {
       console.log(colors.dim(`  ${next}`));
     }
+  }
+}
+
+function printRisk(level: 'high' | 'medium' | 'low', reason: string): void {
+  const badge = level === 'high' ? colors.red(`[${level}]`) : level === 'medium' ? colors.yellow(`[${level}]`) : colors.green(`[${level}]`);
+  console.log('');
+  console.log(`${colors.bold('Risk')}  ${badge}  ${colors.dim(reason)}`);
+}
+
+function printPublicApi(changes: PublicApiSymbol[]): void {
+  console.log('');
+  console.log(colors.bold('Public API surface'));
+  if (changes.length === 0) {
+    console.log(colors.dim('  none'));
+    return;
+  }
+  for (const item of changes) {
+    const kindLabel = item.kind === 'route' ? colors.magenta('route') : item.kind === 'export' ? colors.cyan('export') : colors.blue('public');
+    const range = item.range !== '?' ? ` [${item.range}]` : '';
+    console.log(`  ${item.symbol} ${colors.dim(`${item.file}${range}`)} ${kindLabel}`);
   }
 }
 

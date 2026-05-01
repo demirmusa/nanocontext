@@ -115,7 +115,7 @@ export class StructurePipeline implements IStructurePipeline {
     manifestStore.save(manifest);
 
     // Merge exclude patterns from config, .gitignore, and .nanocontextignore
-    const ignorePatterns = [...config.exclude];
+    const ignorePatterns = [...(config.exclude ?? [])];
     ignorePatterns.push(...loadGitignorePatterns(projectRoot));
     const ignorePath = path.join(projectRoot, '.nanocontextignore');
     if (fs.existsSync(ignorePath)) {
@@ -127,8 +127,9 @@ export class StructurePipeline implements IStructurePipeline {
     }
 
     // Collect files matching include patterns, excluding exclude patterns
+    const allPatterns = [...config.include, ...deriveTextPatterns(config.include)];
     let files: string[] = [];
-    for (const pattern of config.include) {
+    for (const pattern of allPatterns) {
       const matched = await glob(pattern, {
         cwd: projectRoot,
         ignore: ignorePatterns,
@@ -596,6 +597,21 @@ export class StructurePipeline implements IStructurePipeline {
 
     return methods;
   }
+}
+
+const PLAINTEXT_EXTENSIONS = ['md', 'mdx', 'txt'];
+
+function deriveTextPatterns(includePatterns: string[]): string[] {
+  const result = new Set<string>();
+  for (const pattern of includePatterns) {
+    const starIdx = pattern.indexOf('*');
+    if (starIdx === -1) continue;
+    const prefix = pattern.slice(0, starIdx);
+    for (const ext of PLAINTEXT_EXTENSIONS) {
+      result.add(`${prefix}**/*.${ext}`);
+    }
+  }
+  return [...result];
 }
 
 function inferNamespace(exports: string[]): string | undefined {

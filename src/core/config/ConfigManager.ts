@@ -3,21 +3,6 @@ import * as path from 'path';
 import { ProjectConfig, UserConfig } from '../interfaces/types';
 import { IConfigManager } from '../interfaces/IConfigManager';
 
-const DEFAULT_EXCLUDE = [
-  '**/*.test.ts',
-  '**/*.spec.ts',
-  '**/node_modules/**',
-  '**/log/**',
-  '**/logs/**',
-  '**/*.min.js',
-  '**/*.bundle.js',
-];
-
-const BUILTIN_NOISY_EXCLUDE = [
-  '**/log/**',
-  '**/logs/**',
-];
-
 export class ConfigManager implements IConfigManager {
   private projectRoot: string;
 
@@ -39,13 +24,7 @@ export class ConfigManager implements IConfigManager {
       return this.getDefaultProjectConfig();
     }
     const raw = fs.readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<ProjectConfig>;
-    const config = { ...this.getDefaultProjectConfig(), ...parsed };
-    config.exclude = unique([
-      ...(parsed.exclude ?? this.getDefaultProjectConfig().exclude),
-      ...BUILTIN_NOISY_EXCLUDE,
-    ]);
-    return config;
+    return { ...this.getDefaultProjectConfig(), ...JSON.parse(raw) };
   }
 
   async loadUserConfig(): Promise<UserConfig> {
@@ -87,8 +66,7 @@ export class ConfigManager implements IConfigManager {
     return {
       version: 1,
       languages: [],
-      include: ['src/**/*', '**/*.md', '**/*.txt'],
-      exclude: [...DEFAULT_EXCLUDE],
+      include: ['src/**/*'],
       aiInsight: true,
       aiInsightConcurrency: 20,
       watch: { debounceMs: 1000 },
@@ -144,8 +122,4 @@ export class ConfigManager implements IConfigManager {
       dir = parent;
     }
   }
-}
-
-function unique<T>(values: T[]): T[] {
-  return [...new Set(values)];
 }

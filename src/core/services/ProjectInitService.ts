@@ -15,6 +15,7 @@ const DEFAULT_IGNORE_PATTERNS = [
   '**/*.bundle.js',
 ];
 
+
 export interface InitConfigInput {
   languages: string[];
   includePatterns: string[];
@@ -42,7 +43,9 @@ export class ProjectInitService {
     return {
       languages,
       sourceDirs,
-      defaultIncludePatterns: sourceDirs.map(sourceDir => sourceDir === '.' ? '**/*' : `${sourceDir}/**/*`),
+      defaultIncludePatterns: unique(
+        sourceDirs.map(sourceDir => sourceDir === '.' ? '**/*' : `${sourceDir}/**/*`),
+      ),
     };
   }
 
@@ -119,7 +122,7 @@ export class ProjectInitService {
     const existing = configManager.isInitialized() ? await configManager.loadProjectConfig() : null;
     const projectConfig = configManager.getDefaultProjectConfig();
     projectConfig.languages = input.languages;
-    projectConfig.include = input.includePatterns;
+    projectConfig.include = unique([...input.includePatterns]);
     projectConfig.aiInsight = input.aiInsight;
     projectConfig.search.smartSearchEnabled = input.smartSearchEnabled;
     if (existing?.aiInsightConcurrency !== undefined) {
@@ -183,4 +186,8 @@ function appendMissingIgnorePatterns(ignorePath: string, patterns: string[]): bo
   const prefix = content.length > 0 && !content.endsWith('\n') ? '\n' : '';
   fs.appendFileSync(ignorePath, `${prefix}${missing.join('\n')}\n`, 'utf-8');
   return true;
+}
+
+function unique<T>(values: T[]): T[] {
+  return [...new Set(values)];
 }

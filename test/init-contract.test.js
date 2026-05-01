@@ -64,6 +64,8 @@ test('project init persists smart search in project config', async () => {
 
   const projectConfig = JSON.parse(fs.readFileSync(path.join(projectRoot, 'nanocontextconfig.json'), 'utf-8'));
   assert.equal(projectConfig.search.smartSearchEnabled, true);
+  assert.deepEqual(projectConfig.include, ['src/**/*']);
+  assert.equal(Object.hasOwn(projectConfig, 'exclude'), false);
 });
 
 test('nc init supports non-interactive setup flags for benchmark automation', () => {
@@ -89,6 +91,7 @@ test('nc init supports non-interactive setup flags for benchmark automation', ()
   const ignoreFile = fs.readFileSync(path.join(projectRoot, '.nanocontextignore'), 'utf-8');
 
   assert.deepEqual(projectConfig.include, ['Dapper/**/*.cs']);
+  assert.equal(Object.hasOwn(projectConfig, 'exclude'), false);
   assert.equal(projectConfig.aiInsight, false);
   assert.equal(userConfig.llm.provider, 'none');
   assert.equal(userConfig.embedding.provider, 'none');

@@ -18,7 +18,7 @@ export class SearchFormatter {
 
     const lines: string[] = [];
     if (fallback) {
-      lines.push(`fallback: ${fallback.mode} from ${fallback.from} for "${fallback.originalQuery}" (${fallback.reason})`);
+      lines.push(`fallback: ${fallback.mode} (${fallback.reason})`);
       lines.push('');
     }
 
@@ -27,12 +27,6 @@ export class SearchFormatter {
       for (const m of methods) {
         const params = m.sig ? SearchFormatter.extractParams(m.sig) : '';
         lines.push(`  ${m.method || m.class}(${params})[${m.loc}]`);
-        if (m.matchReason && !fallback) {
-          lines.push(`    note: ${m.matchReason}`);
-        }
-        if (m.suggestedNext) {
-          lines.push(`    next: ${m.suggestedNext}`);
-        }
         if (m.related?.length) {
           lines.push(`    related: ${m.related.map(item => `${item.method || item.class}[${item.loc}]`).join(', ')}`);
         }
@@ -45,9 +39,6 @@ export class SearchFormatter {
 
     for (const mem of memories) {
       lines.push(`[memory${mem.file ? ` ${mem.file}` : ''}] ${mem.text}`);
-      if (mem.suggestedNext) {
-        lines.push(`  next: ${mem.suggestedNext}`);
-      }
     }
 
     if (lines.length === 0) {
@@ -130,9 +121,6 @@ export class SearchFormatter {
       }
       if (result.matchReason) {
         lines.push(`   reason: ${result.matchReason}`);
-      }
-      if (result.suggestedNext) {
-        lines.push(`   next: ${result.suggestedNext}`);
       }
       if (result.related?.length) {
         lines.push(`   related: ${result.related.map(item => `${item.method || item.class}[${item.loc}]`).join(', ')}`);

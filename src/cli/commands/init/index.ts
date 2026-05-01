@@ -19,6 +19,7 @@ interface InitCommandOptions {
   mode?: 'mcp' | 'cli';
   agents?: string;
   yes?: boolean;
+  setupOnly?: boolean;
 }
 
 export async function initCommand(options: InitCommandOptions = {}): Promise<void> {
@@ -26,13 +27,22 @@ export async function initCommand(options: InitCommandOptions = {}): Promise<voi
   const container = new Container(cwd);
   const nonInteractive = hasNonInteractiveOptions(options);
 
+  if (options.setupOnly) {
+    if (!container.projectInitService.isInitialized(cwd)) {
+      console.log(colors.yellow('NanoContext is not initialized in this project. Run `nc init` first.'));
+      return;
+    }
+    await ensureMissingSteps(container, cwd, options);
+    return;
+  }
+
   if (container.projectInitService.isInitialized(cwd)) {
     console.log(colors.yellow('NanoContext is already initialized in this project.'));
     const overwrite = nonInteractive
       ? Boolean(options.yes)
       : await confirm({ message: 'Reinitialize from scratch?', default: false });
     if (!overwrite) {
-      await ensureMissingSteps(container, cwd);
+      await ensureMissingSteps(container, cwd, options);
       return;
     }
   }
@@ -101,7 +111,7 @@ function logAgentSetupResult(result: { createdMcpConfigs: string[]; removedMcpCo
   }
 }
 
-async function ensureMissingSteps(container: Container, cwd: string): Promise<void> {
+async function ensureMissingSteps(container: Container, cwd: string, options: InitCommandOptions = {}): Promise<void> {
   console.log(colors.dim('\nChecking for missing setup steps...\n'));
   let fixed = 0;
 
@@ -110,15 +120,27 @@ async function ensureMissingSteps(container: Container, cwd: string): Promise<vo
     fixed++;
   }
 
-  const interactionMode = await select({
-    message: 'How will you use NanoContext?',
-    choices: [
-      { name: 'Via MCP Server (Recommended for Cursor/Windsurf/Claude)', value: 'mcp' },
-      { name: 'Via CLI directly', value: 'cli' },
-    ],
-  });
+  const nonInteractive = hasNonInteractiveOptions(options);
 
+<<<<<<< Updated upstream
   const setupResult = container.agentSetupService.applySetup(cwd, await selectAgents(container), interactionMode as 'mcp' | 'cli');
+=======
+  const interactionMode = nonInteractive && options.mode
+    ? options.mode
+    : await select({
+      message: 'How will you use NanoContext?',
+      choices: [
+        { name: 'Via MCP Server (Recommended for Cursor/Windsurf/Claude)', value: 'mcp' },
+        { name: 'Via CLI directly', value: 'cli' },
+      ],
+    });
+
+  const ensureAgents = nonInteractive && options.agents
+    ? resolveAgentsFromOptions(container, options.agents)
+    : await selectAgents(container);
+  const ensureMode = interactionMode as 'mcp' | 'cli';
+  const setupResult = container.agentSetupService.applySetup(cwd, ensureAgents, ensureMode);
+>>>>>>> Stashed changes
   logAgentSetupResult(setupResult);
   fixed += setupResult.createdMcpConfigs.length + setupResult.removedMcpConfigs.length + setupResult.updatedAgentDocs.length;
 

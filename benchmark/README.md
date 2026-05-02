@@ -24,17 +24,49 @@ Set the `NC_INIT_*` values in `benchmark/.env`, especially:
 The benchmark scripts load all `nc init` provider settings from `benchmark/.env`.
 If you want all Codex benchmark runs to use the same execution model by default, set `CODEX_RUN_MODEL` there as well.
 
+For local Ollama embeddings, set these values in `benchmark/.env`:
+
+```powershell
+NC_INIT_EMBEDDING_PROVIDER=ollama
+NC_INIT_EMBEDDING_MODEL=nomic-embed-text
+NC_INIT_EMBEDDING_ENDPOINT=http://localhost:11434
+NC_INIT_EMBEDDING_API_KEY=
+```
+
+Make sure the model exists locally first:
+
+```powershell
+ollama pull nomic-embed-text
+```
+
+You can also start from the Ollama example env:
+
+```powershell
+Copy-Item benchmark/.env.ollama.example benchmark/.env
+```
+
+For a keyless setup that uses your Codex login for NanoContext LLM calls and local Ollama for embeddings:
+
+```powershell
+npm run build
+node dist/cli/index.js codex login
+Copy-Item benchmark/.env.codex.example benchmark/.env
+ollama pull nomic-embed-text
+```
+
+This uses NanoContext's own Codex OAuth login stored at `~/.nanocontext/auth.json`; it does not read Codex CLI auth files and does not require an API key.
+
 ## Current Flow
 
 - Repositories are cached under `benchmark/repos/_clones`.
-- NanoContext-initialized and scanned copies are cached under `benchmark/repos/_nc_indexed`.
+- NanoContext-initialized and scanned copies are cached under `benchmark/repos/_nc_indexed_<embedding-provider-model>`.
 - Individual benchmark runs write outputs under `benchmark/runs`.
 - Each run folder name includes a fresh GUID, so every execution gets isolated baseline and nanocontext workspaces.
 
 The benchmark cache is reused:
 
 - if a repo is already cloned, it is not cloned again
-- if a repo is already initialized and scanned, `nc init` and `nc scan` are not repeated
+- if a repo is already initialized and scanned for the selected embedding provider/model, `nc init` and `nc scan` are not repeated
 
 Each benchmark run now executes three conditions:
 
@@ -148,6 +180,7 @@ Benchmark initialization uses non-interactive `nc init` with:
 - `NC_INIT_LLM_API_KEY`
 - `NC_INIT_EMBEDDING_PROVIDER`
 - `NC_INIT_EMBEDDING_MODEL`
+- `NC_INIT_EMBEDDING_ENDPOINT`
 - `NC_INIT_EMBEDDING_API_KEY`
 - `NC_INIT_MODE`
 - `NC_INIT_AGENTS`

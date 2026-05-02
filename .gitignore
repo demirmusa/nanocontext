@@ -4,6 +4,8 @@ dist/
 *.tsbuildinfo
 .env
 .env.*
+!benchmark/.env.codex.example
+!benchmark/.env.ollama.example
 *.log
 coverage/
 .nyc_output/

@@ -39,7 +39,7 @@ program
 program
   .command('init')
   .description('Initialize NanoContext in current project')
-  .option('--llm-provider <provider>', 'LLM provider: ollama | openai | anthropic | none')
+  .option('--llm-provider <provider>', 'LLM provider: ollama | openai | anthropic | codex-oauth | none')
   .option('--llm-model <model>', 'LLM model')
   .option('--llm-endpoint <url>', 'LLM endpoint for local providers')
   .option('--llm-api-key <key>', 'LLM API key for cloud providers')

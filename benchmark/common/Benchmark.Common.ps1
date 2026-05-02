@@ -78,9 +78,26 @@ function Get-BenchmarkCloneRoot {
 }
 
 function Get-BenchmarkIndexedRoot {
-    $indexedRoot = Join-Path (Get-BenchmarkReposRoot) "_nc_indexed"
+    Import-BenchmarkEnv
+    $embeddingProvider = Get-BenchmarkEnvValue -Name 'NC_INIT_EMBEDDING_PROVIDER' -DefaultValue 'openai'
+    $embeddingModel = Get-BenchmarkEnvValue -Name 'NC_INIT_EMBEDDING_MODEL' -DefaultValue 'text-embedding-3-small'
+    $cacheKey = Get-BenchmarkCacheKey -Parts @($embeddingProvider, $embeddingModel)
+    $indexedRoot = Join-Path (Get-BenchmarkReposRoot) "_nc_indexed_$cacheKey"
     New-Item -ItemType Directory -Path $indexedRoot -Force | Out-Null
     return $indexedRoot
+}
+
+function Get-BenchmarkCacheKey {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Parts
+    )
+
+    $joined = ($Parts | ForEach-Object {
+        ([string]$_).ToLowerInvariant() -replace '[^a-z0-9]+', '-'
+    }) -join '-'
+
+    return $joined.Trim('-')
 }
 
 function Resolve-BenchmarkInitSettings {
@@ -782,10 +799,13 @@ function Invoke-NanoContextInit {
     Import-BenchmarkEnv
     $llmProvider = Get-BenchmarkEnvValue -Name 'NC_INIT_LLM_PROVIDER' -DefaultValue 'openai'
     $llmModel = Get-BenchmarkEnvValue -Name 'NC_INIT_LLM_MODEL' -DefaultValue 'gpt-5-mini-2025-08-07'
-    $llmApiKey = Get-BenchmarkEnvValue -Name 'NC_INIT_LLM_API_KEY' -Required
+    $llmApiKeyRequired = $llmProvider -in @('openai', 'anthropic')
+    $llmApiKey = Get-BenchmarkEnvValue -Name 'NC_INIT_LLM_API_KEY' -DefaultValue '' -Required:$llmApiKeyRequired
     $embeddingProvider = Get-BenchmarkEnvValue -Name 'NC_INIT_EMBEDDING_PROVIDER' -DefaultValue 'openai'
     $embeddingModel = Get-BenchmarkEnvValue -Name 'NC_INIT_EMBEDDING_MODEL' -DefaultValue 'text-embedding-3-small'
-    $embeddingApiKey = Get-BenchmarkEnvValue -Name 'NC_INIT_EMBEDDING_API_KEY' -DefaultValue $llmApiKey
+    $embeddingApiKeyRequired = $embeddingProvider -eq 'openai' -and [string]::IsNullOrWhiteSpace($llmApiKey)
+    $embeddingApiKey = Get-BenchmarkEnvValue -Name 'NC_INIT_EMBEDDING_API_KEY' -DefaultValue $llmApiKey -Required:$embeddingApiKeyRequired
+    $embeddingEndpoint = Get-BenchmarkEnvValue -Name 'NC_INIT_EMBEDDING_ENDPOINT' -DefaultValue $null
     $initSettings = Resolve-BenchmarkInitSettings
     $mode = $initSettings.Mode
     $agents = (@($initSettings.Agents) -join ',')
@@ -799,15 +819,22 @@ function Invoke-NanoContextInit {
         "init",
         "--llm-provider", $llmProvider,
         "--llm-model", $llmModel,
-        "--llm-api-key", $llmApiKey,
         "--embedding-provider", $embeddingProvider,
         "--embedding-model", $embeddingModel,
-        "--embedding-api-key", $embeddingApiKey,
         "--include", ($RepositoryDefinition.Include -join ","),
         "--mode", $mode,
         "--agents", $agents,
         "--yes"
     )
+    if (-not [string]::IsNullOrWhiteSpace($llmApiKey)) {
+        $arguments += @("--llm-api-key", $llmApiKey)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($embeddingApiKey)) {
+        $arguments += @("--embedding-api-key", $embeddingApiKey)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($embeddingEndpoint)) {
+        $arguments += @("--embedding-endpoint", $embeddingEndpoint)
+    }
     if ($smartSearchEnabled -eq 'true') {
         $arguments += "--smart-search"
     }
@@ -1340,13 +1367,15 @@ function Get-TotalTokens {
 function Invoke-BenchmarkRun {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$TaskId,
+        [hashtable]$TaskDefinition,
+        [Parameter(Mandatory = $true)]
+        [hashtable]$RepositoryDefinition,
         [string]$Model
     )
 
     $resolvedModel = Resolve-BenchmarkCodexRunModel -Model $Model
-    $taskDefinition = Get-BenchmarkTaskDefinition -Id $TaskId
-    $repositoryDefinition = Get-BenchmarkRepositoryDefinition -Name $taskDefinition.Repository
+    $taskDefinition = $TaskDefinition
+    $repositoryDefinition = $RepositoryDefinition
     $runContext = New-BenchmarkRunContext -TaskDefinition $taskDefinition
     Add-BenchmarkEvent -EventsPath $runContext.EventsPath -Type "run.start" -Data @{
         benchmarkId = $taskDefinition.Id
@@ -1451,7 +1480,7 @@ function Invoke-BenchmarkRun {
     }
 
     Write-Host "" -ForegroundColor Green
-    Write-Host "Benchmark complete: $TaskId" -ForegroundColor Green
+    Write-Host "Benchmark complete: $($taskDefinition.Id)" -ForegroundColor Green
     Write-Host "Run root: $($runContext.RunRoot)" -ForegroundColor Green
     Write-Host "Baseline summary: $baselineSummaryPath" -ForegroundColor Green
     Write-Host "NanoContext summary: $nanocontextSummaryPath" -ForegroundColor Green

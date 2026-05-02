@@ -4,12 +4,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-. (Join-Path $PSScriptRoot "common\Benchmark.Definitions.ps1")
+$taskScripts = Get-ChildItem -LiteralPath $PSScriptRoot -Filter "benchmark-*-task*.ps1" |
+    Sort-Object Name
 
-$taskIds = Get-BenchmarkTaskIds
-
-foreach ($taskId in $taskIds) {
+foreach ($taskScript in $taskScripts) {
     Write-Host "" -ForegroundColor Cyan
-    Write-Host "=== Running $taskId ===" -ForegroundColor Cyan
-    & (Join-Path $PSScriptRoot "run-benchmark.ps1") -TaskId $taskId -Model $Model
+    Write-Host "=== Running $($taskScript.BaseName) ===" -ForegroundColor Cyan
+    & $taskScript.FullName -Model $Model
 }

@@ -297,8 +297,8 @@ async function resolveProviderConfigFromOptions(
       model: options.llmModel || (llmProvider === 'openai' ? 'gpt-5.4-mini' : 'claude-haiku-4-5-20251001'),
     };
     embeddingConfig = resolveEmbeddingConfigFromOptions(options, llmConfig);
-  } else if (llmProvider === 'codex-cli') {
-    llmConfig = { provider: 'codex-cli', model: options.llmModel || 'gpt-5.4-mini' };
+  } else if (llmProvider === 'codex-oauth') {
+    llmConfig = { provider: 'codex-oauth', model: options.llmModel || 'gpt-5.4-mini' };
     embeddingConfig = resolveEmbeddingConfigFromOptions(options, llmConfig);
   } else {
     throw new Error(`Unsupported --llm-provider value: ${llmProvider}`);

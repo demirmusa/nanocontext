@@ -6,12 +6,14 @@ import { IMemoryStore } from '../interfaces/IMemoryStore';
 import { IStateStore } from '../interfaces/IStateStore';
 import { ILogger } from '../interfaces/ILogger';
 import { SearchResult } from '../interfaces/types';
+import { isSearchStopWord } from './search-stop-words';
 
 type SearchSignal = 'exact' | 'lexical' | 'regex' | 'vector' | 'memory' | 'path';
 
 interface RankedCandidate {
   result: SearchResult;
   score: number;
+  baseScore: number;
   signals: Set<SearchSignal>;
   matchedBy: Set<NonNullable<SearchResult['matchedBy']>[number]>;
   scoreParts: NonNullable<SearchResult['scoreParts']>;
@@ -186,13 +188,17 @@ export class SearchEngine implements ISearchEngine {
       const directBoost = lexicalBoostScore(query, result);
       const pathBoost = pathProximityScore(query, result.file);
       const nativeScore = normalizeNativeScore(signal, result.score);
-      const signalScore = (weight / (60 + rank)) + directBoost + pathBoost + nativeScore + typePriorityScore(result);
+      const rankScore = weight / (60 + rank);
+      const baseScore = directBoost + pathBoost + typePriorityScore(result);
+      const signalScore = rankScore + baseScore + nativeScore;
       const reasons = describeSignal(signal, directBoost, pathBoost, nativeScore);
       const scoreParts = buildScoreParts(query, signal, directBoost, pathBoost, nativeScore, result);
       const matchedBy = detectMatchedBy(query, result);
 
       if (existing) {
-        existing.score += signalScore;
+        const baseDelta = Math.max(0, baseScore - existing.baseScore);
+        existing.baseScore += baseDelta;
+        existing.score += rankScore + nativeScore + baseDelta;
         existing.signals.add(signal);
         for (const match of matchedBy) existing.matchedBy.add(match);
         mergeScoreParts(existing.scoreParts, scoreParts);
@@ -204,6 +210,7 @@ export class SearchEngine implements ISearchEngine {
       candidates.set(key, {
         result: { ...result },
         score: signalScore,
+        baseScore,
         signals: new Set([signal]),
         matchedBy: new Set(matchedBy),
         scoreParts,
@@ -239,10 +246,6 @@ function splitIdentifier(value: string): string {
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/[._#:/\\-]+/g, ' ');
-}
-
-function compactToken(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9_]+/g, '');
 }
 
 function lexicalBoostScore(query: string, result: Pick<SearchResult, 'file' | 'method' | 'class' | 'sig' | 'refs' | 'insight' | 'text'>): number {
@@ -333,10 +336,14 @@ function pathProximityScore(query: string, file: string | undefined): number {
 
 function tokenize(value: string): string[] {
   return splitIdentifier(value)
-    .toLowerCase()
-    .split(/[^a-z0-9_]+/)
+    .toLocaleLowerCase()
+    .split(/[^\p{L}\p{N}_]+/u)
     .map(token => token.trim())
-    .filter(token => token.length > 0);
+    .filter(token => token.length > 1 && !isSearchStopWord(token));
+}
+
+function compactToken(value: string): string {
+  return value.toLocaleLowerCase().replace(/[^\p{L}\p{N}_]+/gu, '');
 }
 
 function normalizeNativeScore(signal: SearchSignal, score: number | undefined): number {
@@ -377,11 +384,11 @@ function buildScoreParts(
 }
 
 function mergeScoreParts(target: NonNullable<SearchResult['scoreParts']>, source: NonNullable<SearchResult['scoreParts']>): void {
-  target.lexical = (target.lexical ?? 0) + (source.lexical ?? 0);
-  target.vector = (target.vector ?? 0) + (source.vector ?? 0);
-  target.memory = (target.memory ?? 0) + (source.memory ?? 0);
-  target.symbol = (target.symbol ?? 0) + (source.symbol ?? 0);
-  target.path = (target.path ?? 0) + (source.path ?? 0);
+  target.lexical = Math.max(target.lexical ?? 0, source.lexical ?? 0);
+  target.vector = Math.max(target.vector ?? 0, source.vector ?? 0);
+  target.memory = Math.max(target.memory ?? 0, source.memory ?? 0);
+  target.symbol = Math.max(target.symbol ?? 0, source.symbol ?? 0);
+  target.path = Math.max(target.path ?? 0, source.path ?? 0);
 }
 
 function roundScoreParts(parts: NonNullable<SearchResult['scoreParts']>): NonNullable<SearchResult['scoreParts']> {
@@ -402,7 +409,7 @@ function detectMatchedBy(query: string, result: SearchResult): NonNullable<Searc
     const compact = compactToken(value ?? '');
     const valueTokens = new Set(tokenize(value ?? ''));
     return lower.includes(q)
-      || (compactQuery.length > 0 && compact.includes(compactQuery))
+      || (compactQuery.length > 1 && compact.includes(compactQuery))
       || tokens.some(token => valueTokens.has(token) || lower.includes(token));
   };
 
@@ -410,7 +417,7 @@ function detectMatchedBy(query: string, result: SearchResult): NonNullable<Searc
   if (hasMatch(result.class)) matches.add('class');
   if (hasMatch(result.sig)) matches.add('signature');
   if (hasMatch(result.file)) matches.add('file path');
-  if (hasMatch(result.text) || result.type === 'memory') matches.add('memory');
+  if (result.type === 'memory') matches.add('memory');
   if (result.refs?.some(ref => hasMatch(ref))) matches.add('refs');
   if (hasMatch(result.insight)) matches.add('insight');
 
@@ -438,8 +445,8 @@ function describeSignal(signal: SearchSignal, directBoost: number, pathBoost: nu
   return reasons;
 }
 
-function buildMatchReason(query: string, signals: string[], reasons: string[]): string {
-  return `Hybrid match for "${query}": ${Array.from(new Set(reasons)).join(', ')}; signals=${signals.join('+')}.`;
+function buildMatchReason(_query: string, signals: string[], reasons: string[]): string {
+  return `Signals=${signals.join('+')}; evidence=${Array.from(new Set(reasons)).join(', ')}.`;
 }
 
 function mergeResults(primary: SearchResult, next: SearchResult): SearchResult {

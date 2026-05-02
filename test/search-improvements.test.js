@@ -9,6 +9,7 @@ const { PrepareService, formatPrepareReport } = require('../dist/core/services/P
 const { CodeReadService } = require('../dist/core/services/CodeReadService');
 const { MemoryService } = require('../dist/core/services/MemoryService');
 const { SearchFormatter } = require('../dist/core/search/SearchFormatter');
+const { isSearchStopWord, loadSearchStopWords } = require('../dist/core/search/search-stop-words');
 const { SqliteStateStore } = require('../dist/core/storage/SqliteStateStore');
 const { createTempProject } = require('./helpers/project');
 
@@ -99,6 +100,13 @@ test('openai smart rerank omits unsupported temperature from chat completion req
   assert.deepEqual(result.selectedIds, ['candidate-1']);
   assert.equal(capturedRequest.temperature, undefined);
   assert.equal(capturedRequest.model, 'gpt-5-mini-2025-08-07');
+});
+
+test('search stop words load from language-specific files', () => {
+  assert.equal(isSearchStopWord('and'), true);
+  assert.equal(isSearchStopWord('ve'), true);
+  assert.equal(loadSearchStopWords(['tr']).has('ve'), true);
+  assert.equal(loadSearchStopWords(['tr']).has('and'), false);
 });
 
 test('sqlite search index ranks qualified symbols and searches insight refs metadata', async (t) => {
@@ -621,7 +629,7 @@ test('smart search reranks natural-language default search before returning resu
       selectRelevantSearchResults: async (_query, candidates, limit) => {
         assert.equal(limit, 1);
         assert.equal(candidates.length, 3);
-        return { selectedIds: [candidates[1].id], rawResponse: '' };
+        return { selectedIds: [candidates[1].id], rawResponse: '{"selectedIds":["method:auth"]}' };
       },
     },
     logger,
@@ -632,6 +640,86 @@ test('smart search reranks natural-language default search before returning resu
   assert.equal(result.id, 'method:auth');
   assert.deepEqual(result.searchTelemetry.fallbackPath, ['intent:semantic', 'vector', 'rerank']);
   assert.equal(result.searchTelemetry.rerankUsed, true);
+  assert.equal(result.searchTelemetry.smartSearch.status, 'selected');
+  assert.equal(result.searchTelemetry.smartSearch.candidateLimit, 3);
+  assert.equal(result.searchTelemetry.smartSearch.candidateCount, 3);
+  assert.equal(result.searchTelemetry.smartSearch.selectedCount, 1);
+  assert.deepEqual(result.searchTelemetry.smartSearch.selectedIds, ['method:auth']);
+  assert.equal(result.searchTelemetry.smartSearch.rawResponse, '{"selectedIds":["method:auth"]}');
+});
+
+test('search service treats Turkish implementation queries as semantic search', async () => {
+  let exactCalls = 0;
+  let vectorCalls = 0;
+  const service = new SearchService(
+    {
+      search: async () => {
+        vectorCalls++;
+        return [{ type: 'method', id: 'method:moderation', file: 'src/Admin/ModerationController.cs', method: 'Approve', loc: '10-20' }];
+      },
+      searchDeep: async () => [],
+      searchExact: () => {
+        exactCalls++;
+        return [];
+      },
+      searchRegex: () => [],
+      searchRegexDeep: async () => [],
+    },
+    createSearchConfigManager(),
+    null,
+    logger,
+  );
+
+  const [result] = await service.execute({
+    mode: 'exact',
+    query: 'gamigion a özel auth eklemek istiyorum. admin/moderation a girebilsin ve kendi katkılarını',
+  });
+
+  assert.equal(exactCalls, 0);
+  assert.equal(vectorCalls, 1);
+  assert.equal(result.searchIntent, 'semantic');
+  assert.deepEqual(result.searchTelemetry.fallbackPath, ['intent:semantic', 'vector']);
+});
+
+test('smart search sends code text only for memory candidates', async () => {
+  const service = new SearchService(
+    {
+      search: async () => [
+        {
+          type: 'method',
+          id: 'method:auth',
+          file: 'src/auth/AuthService.ts',
+          method: 'grantAccess',
+          loc: '10-20',
+          text: 'expanded vector text for auth access',
+        },
+        {
+          type: 'memory',
+          id: 'memory:auth',
+          text: 'remember auth access rules',
+        },
+      ],
+      searchDeep: async () => [],
+      searchExact: () => [],
+      searchRegex: () => [],
+      searchRegexDeep: async () => [],
+    },
+    createSearchConfigManager({ smartSearchEnabled: true, smartSearchCandidateMultiplier: 3 }),
+    {
+      name: 'fake-llm',
+      isAvailable: async () => true,
+      generateFileInsights: async () => ({ insights: [], rawResponse: '' }),
+      selectRelevantSearchResults: async (_query, candidates) => {
+        assert.equal(candidates.find(candidate => candidate.id === 'method:auth').text, undefined);
+        assert.equal(candidates.find(candidate => candidate.id === 'memory:auth').text, 'remember auth access rules');
+        return { selectedIds: ['method:auth'], rawResponse: '' };
+      },
+    },
+    logger,
+  );
+
+  const [result] = await service.execute({ mode: 'vector', query: 'auth access', limit: 1, typeFilter: 'all' });
+  assert.equal(result.id, 'method:auth');
 });
 
 test('search formatter prints compact fallback headings before grouped hits', () => {
@@ -672,12 +760,32 @@ test('search formatter explains route matched fields and score parts', () => {
         route: 'intent:semantic',
         fallbackPath: ['intent:semantic', 'vector'],
         rerankUsed: false,
+        smartSearch: {
+          enabled: true,
+          requestedLimit: 1,
+          candidateLimit: 3,
+          candidateCount: 3,
+          selectedCount: 1,
+          selectedIds: ['method:auth'],
+          rawResponse: '{"selectedIds":["method:auth"]}',
+          returnedCount: 1,
+          status: 'selected',
+          candidates: [
+            { id: 'method:auth', label: 'src/auth.ts refreshToken[10-20]', score: 3.25, matchedBy: ['name'] },
+            { id: 'method:generic', label: 'src/generic.ts handle[1-4]', score: 1.5 },
+          ],
+        },
       },
     },
   ]);
 
   assert.match(output, /Search explain: "refresh token"/);
   assert.match(output, /route: intent:semantic > vector/);
+  assert.match(output, /smartSearch: enabled \(selected\)/);
+  assert.match(output, /smartSearch flow: requested=1 candidateLimit=3 candidates=3 selected=1 returned=1/);
+  assert.match(output, /smartSearch selectedIds: method:auth/);
+  assert.doesNotMatch(output, /smartSearch rawResponse/);
+  assert.match(output, /smartSearch candidates:/);
   assert.match(output, /matchedBy: name, signature/);
   assert.match(output, /scoreParts: lexical=1.5, vector=0.7, symbol=1/);
   assert.match(output, /next: nc get src\/auth.ts\[2-28\]/);

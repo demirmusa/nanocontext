@@ -272,7 +272,7 @@ test('search engine combines exact lexical regex vector and memory signals with 
 
   const results = await searchEngine.search('AuthService issueToken', 3);
   assert.equal(results[0].id, 'method:target');
-  assert.match(results[0].matchReason, /signals=exact\+lexical\+regex\+vector/);
+  assert.match(results[0].matchReason, /Signals=exact\+lexical\+regex\+vector/);
   assert.equal(typeof results[0].score, 'number');
   assert.equal(results.filter(result => result.id === 'method:target').length, 1);
   assert.ok(results.some(result => result.type === 'memory'));

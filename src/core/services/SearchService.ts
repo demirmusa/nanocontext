@@ -15,6 +15,7 @@ type VectorRouteResult = {
   results: SearchResult[];
   fallbackPath: string[];
   rerankUsed?: boolean;
+  smartSearch?: NonNullable<NonNullable<SearchResult['searchTelemetry']>['smartSearch']>;
 };
 
 export type SearchMode = 'exact' | 'regex' | 'vector';
@@ -132,6 +133,7 @@ export class SearchService {
         intent,
         semanticRoute.fallbackPath,
         semanticRoute.rerankUsed,
+        semanticRoute.smartSearch,
       );
       this.storeCachedResults(cacheKey, results);
       return results;
@@ -154,6 +156,7 @@ export class SearchService {
       intent,
       route.fallbackPath,
       route.rerankUsed,
+      route.smartSearch,
     );
   }
 
@@ -166,29 +169,56 @@ export class SearchService {
     const { limit } = searchConfig;
 
     if (!searchConfig.smartSearchEnabled) {
+      const results = await this.runVectorSearch(request, limit);
       return {
-        results: await this.runVectorSearch(request, limit),
+        results,
         fallbackPath,
+        smartSearch: {
+          enabled: false,
+          requestedLimit: limit,
+          returnedCount: results.length,
+          status: 'disabled',
+          reason: 'smart search disabled in project config',
+        },
       };
     }
 
     if (!this.llmProvider) {
       this.logger?.warn('Smart search is enabled but no LLM provider is configured; falling back to hybrid vector ordering.');
+      const results = await this.runVectorSearch(request, limit);
       return {
-        results: await this.runVectorSearch(request, limit),
+        results,
         fallbackPath: [...fallbackPath, 'rerank-unavailable'],
         rerankUsed: false,
+        smartSearch: {
+          enabled: true,
+          requestedLimit: limit,
+          returnedCount: results.length,
+          status: 'unavailable',
+          reason: 'LLM provider is not configured',
+        },
       };
     }
 
     const candidateLimit = this.resolveCandidateLimit(limit, searchConfig.smartSearchCandidateMultiplier, intent);
     const candidates = await this.runVectorSearch(request, candidateLimit);
+    const candidateSummaries = candidates.map((candidate, index) => this.summarizeSmartSearchCandidate(candidate, index));
 
     if (candidates.length <= limit) {
       return {
         results: candidates,
         fallbackPath: [...fallbackPath, 'rerank-skipped'],
         rerankUsed: false,
+        smartSearch: {
+          enabled: true,
+          requestedLimit: limit,
+          candidateLimit,
+          candidateCount: candidates.length,
+          returnedCount: candidates.length,
+          status: 'skipped',
+          reason: `candidate count ${candidates.length} is within requested limit ${limit}`,
+          candidates: candidateSummaries,
+        },
       };
     }
 
@@ -209,6 +239,18 @@ export class SearchService {
           results: selectedResults,
           fallbackPath: [...fallbackPath, 'rerank'],
           rerankUsed: true,
+          smartSearch: {
+            enabled: true,
+            requestedLimit: limit,
+            candidateLimit,
+            candidateCount: candidates.length,
+            selectedCount: selectedResults.length,
+            selectedIds: selection.selectedIds,
+            rawResponse: selection.rawResponse,
+            returnedCount: selectedResults.length,
+            status: 'selected',
+            candidates: candidateSummaries,
+          },
         };
       }
     } catch (error) {
@@ -219,6 +261,18 @@ export class SearchService {
       results: candidates.slice(0, limit),
       fallbackPath: [...fallbackPath, 'rerank-fallback'],
       rerankUsed: false,
+      smartSearch: {
+        enabled: true,
+        requestedLimit: limit,
+        candidateLimit,
+        candidateCount: candidates.length,
+        selectedCount: 0,
+        selectedIds: [],
+        returnedCount: Math.min(candidates.length, limit),
+        status: 'fallback',
+        reason: 'LLM did not return valid selected candidate ids',
+        candidates: candidateSummaries,
+      },
     };
   }
 
@@ -254,11 +308,27 @@ export class SearchService {
       sig: result.sig,
       refs: result.refs,
       insight: result.insight,
-      text: result.text,
+      text: result.type === 'memory' ? result.text : undefined,
       score: result.score,
       matchedBy: result.matchedBy,
       scoreParts: result.scoreParts,
       matchReason: result.matchReason,
+    };
+  }
+
+  private summarizeSmartSearchCandidate(
+    result: SearchResult,
+    index: number,
+  ): NonNullable<NonNullable<NonNullable<SearchResult['searchTelemetry']>['smartSearch']>['candidates']>[number] {
+    const id = result.id || `${result.type}:${index}`;
+    const label = result.type === 'memory'
+      ? `[memory] ${result.text ?? id}`
+      : `${result.file ?? 'unknown'} ${result.method ?? result.class ?? ''}${result.loc ? `[${result.loc}]` : ''}`.trim();
+    return {
+      id,
+      label,
+      score: result.score,
+      matchedBy: result.matchedBy,
     };
   }
 
@@ -353,7 +423,7 @@ export class SearchService {
   ): SearchResult[] {
     return results.map(result => ({
       ...result,
-      matchReason: `Fallback ${mode} results for "${originalQuery}" (${reason}).`,
+      matchReason: `Fallback ${mode} from ${from}; ${reason}.`,
       fallback: {
         originalQuery,
         mode,
@@ -384,6 +454,7 @@ export class SearchService {
     intent: SearchResult['searchIntent'],
     fallbackPath: string[],
     rerankUsed?: boolean,
+    smartSearch?: NonNullable<NonNullable<SearchResult['searchTelemetry']>['smartSearch']>,
   ): Promise<SearchResult[]> {
     const clustered = await this.attachMemoryHints(clusterResults(results));
     const topConfidence = clustered[0]?.suggestedNextConfidence;
@@ -395,6 +466,7 @@ export class SearchService {
         fallbackPath,
         rerankUsed,
         topConfidence,
+        smartSearch,
       },
     }));
     this.logger?.debug(`[search] q="${query}" path="${fallbackPath.join(' > ')}" intent=${intent} count=${finalResults.length} rerank=${rerankUsed === true ? 'yes' : rerankUsed === false ? 'no' : 'n/a'} topConfidence=${topConfidence ?? 'n/a'}`);
@@ -447,7 +519,7 @@ function classifyIntent(query: string): SearchResult['searchIntent'] {
   if (/^[A-Za-z_][\w.<>#-]*$/.test(trimmed) && /[A-Z_#.]/.test(trimmed)) {
     return 'exact-symbol';
   }
-  if (/\s/.test(trimmed) && /^[a-z0-9\s-]+$/i.test(trimmed)) {
+  if (/\s/.test(trimmed) && /^[\p{L}\p{N}\s._/#-]+$/u.test(trimmed)) {
     return 'semantic';
   }
   return 'mixed';
@@ -540,7 +612,7 @@ function inferMatchedBy(query: string, result: SearchResult): NonNullable<Search
   if (hasMatch(result.class)) matches.add('class');
   if (hasMatch(result.sig)) matches.add('signature');
   if (hasMatch(result.file)) matches.add('file path');
-  if (hasMatch(result.text) || result.type === 'memory') matches.add('memory');
+  if (result.type === 'memory') matches.add('memory');
   if (result.refs?.some(ref => hasMatch(ref))) matches.add('refs');
   if (hasMatch(result.insight)) matches.add('insight');
   return Array.from(matches);
@@ -561,8 +633,8 @@ function inferScoreParts(query: string, route: string[], result: SearchResult): 
   };
 }
 
-function buildRouteMatchReason(query: string, route: string[], matchedBy: NonNullable<SearchResult['matchedBy']>): string {
+function buildRouteMatchReason(_query: string, route: string[], matchedBy: NonNullable<SearchResult['matchedBy']>): string {
   const routeText = route.join(' > ');
   const matchText = matchedBy.length > 0 ? matchedBy.join(', ') : 'ranked candidate';
-  return `Search match for "${query}" via ${routeText}: ${matchText}.`;
+  return `Route ${routeText}; matched by ${matchText}.`;
 }

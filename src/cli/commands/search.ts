@@ -1,8 +1,9 @@
 import { Container } from '../../core/Container';
 import { SearchFormatter } from '../../core/search/SearchFormatter';
 import { colors } from '../utils/colors';
+import { buildSearchRequest } from './searchRequest';
 
-export async function searchCommand(query: string | undefined, options: { query?: string[]; deep?: boolean; exact?: boolean; vector?: boolean; regex?: boolean; limit?: string }): Promise<void> {
+export async function searchCommand(query: string | undefined, options: { query?: string[]; deep?: boolean; exact?: boolean; vector?: boolean; regex?: boolean; limit?: string; explain?: boolean }): Promise<void> {
   const container = new Container();
 
   if (!container.configManager.isInitialized()) {
@@ -13,7 +14,6 @@ export async function searchCommand(query: string | undefined, options: { query?
   try {
     await container.initialize();
 
-    const limit = parseInt(options.limit || '3', 10);
     const queries = collectQueries(query, options.query);
     if (queries.length === 0) {
       console.error(colors.red('Provide a query or repeat `--query`.'));
@@ -22,11 +22,7 @@ export async function searchCommand(query: string | undefined, options: { query?
 
     for (const [index, currentQuery] of queries.entries()) {
       const results = await container.searchService.execute({
-        mode: options.regex ? 'regex' : options.vector ? 'vector' : 'exact',
-        query: currentQuery,
-        limit,
-        deep: options.deep,
-        typeFilter: options.vector ? 'all' : undefined,
+        ...buildSearchRequest(currentQuery, options),
       });
       if (queries.length > 1) {
         if (index > 0) {
@@ -34,7 +30,11 @@ export async function searchCommand(query: string | undefined, options: { query?
         }
         console.log(colors.bold(`Query: ${currentQuery}`));
       }
-      console.log(options.deep ? SearchFormatter.formatDetailed(results) : SearchFormatter.formatCompact(results));
+      if (options.explain) {
+        console.log(SearchFormatter.formatExplain(currentQuery, results));
+      } else {
+        console.log(options.deep ? SearchFormatter.formatDetailed(results) : SearchFormatter.formatCompact(results));
+      }
     }
   } catch (err) {
     console.error(colors.red(`Search failed: ${err}`));

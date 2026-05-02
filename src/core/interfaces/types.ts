@@ -165,6 +165,24 @@ export interface SearchResult {
     rerankUsed?: boolean;
     fallbackPath?: string[];
     topConfidence?: number;
+    smartSearch?: {
+      enabled: boolean;
+      requestedLimit: number;
+      candidateLimit?: number;
+      candidateCount?: number;
+      selectedCount?: number;
+      selectedIds?: string[];
+      rawResponse?: string;
+      returnedCount?: number;
+      status: 'disabled' | 'unavailable' | 'skipped' | 'selected' | 'fallback';
+      reason?: string;
+      candidates?: Array<{
+        id: string;
+        label: string;
+        score?: number;
+        matchedBy?: SearchResult['matchedBy'];
+      }>;
+    };
   };
 }
 

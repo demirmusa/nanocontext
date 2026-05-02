@@ -32,6 +32,7 @@ Task:
 - Return at most ${limit} candidates.
 - Prefer exact symbol, file, signature, refs, and insight matches when they answer the query.
 - Prefer actionable methods/classes over broad memories unless the memory directly answers the query.
+- For implementation/change requests, prefer production source files over README/docs unless the docs directly answer the query.
 - Preserve the best execution order for the developer: most likely target first.
 - Prefer precision over recall.
 - Do not invent candidate IDs.

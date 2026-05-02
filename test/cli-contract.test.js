@@ -5,6 +5,7 @@ const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const { formatCompactSnippetLines } = require('../dist/cli/commands/get');
+const { buildSearchRequest } = require('../dist/cli/commands/searchRequest');
 const { FileDiscoveryService } = require('../dist/core/services/FileDiscoveryService');
 const { buildIgnoreEntry } = require('../dist/cli/commands/ignore');
 
@@ -115,8 +116,32 @@ test('lookup command help exposes batched query flags', () => {
   const filesHelp = execFileSync(process.execPath, [cliPath, 'files', '--help'], { encoding: 'utf-8' });
 
   assert.match(searchHelp, /--query <query\.\.\.>/);
+  assert.match(searchHelp, /--explain/);
   assert.match(symbolHelp, /--query <query\.\.\.>/);
   assert.match(filesHelp, /--query <query\.\.\.>/);
+});
+
+test('search explain uses the same default request shape', () => {
+  assert.deepEqual(
+    buildSearchRequest('auth moderation', {}),
+    {
+      mode: 'exact',
+      query: 'auth moderation',
+      limit: 3,
+      deep: undefined,
+      typeFilter: undefined,
+    },
+  );
+  assert.deepEqual(
+    buildSearchRequest('auth moderation', { vector: true, deep: true, limit: '5' }),
+    {
+      mode: 'vector',
+      query: 'auth moderation',
+      limit: 5,
+      deep: true,
+      typeFilter: 'all',
+    },
+  );
 });
 
 test('watch command help exposes detached and list modes without stop id', () => {

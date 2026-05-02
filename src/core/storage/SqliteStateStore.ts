@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { IStateStore } from '../interfaces/IStateStore';
 import { InsightQueueItem, SearchResult, StateReference, SymbolIndexMetadata } from '../interfaces/types';
+import { isSearchStopWord } from '../search/search-stop-words';
 
 export class SqliteStateStore implements IStateStore {
   private db: Database.Database | null = null;
@@ -753,10 +754,10 @@ function buildSearchContent(input: {
 function searchableTerms(value: string): string[] {
   const expanded = splitIdentifier(value);
   const terms = expanded
-    .toLowerCase()
-    .split(/[^a-z0-9_]+/)
+    .toLocaleLowerCase()
+    .split(/[^\p{L}\p{N}_]+/u)
     .map(term => term.trim())
-    .filter(term => term.length > 0 && term.length < 64);
+    .filter(term => term.length > 1 && term.length < 64 && !isSearchStopWord(term));
   return [...new Set(terms)];
 }
 
@@ -768,7 +769,7 @@ function splitIdentifier(value: string): string {
 }
 
 function compactToken(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9_]+/g, '');
+  return value.toLocaleLowerCase().replace(/[^\p{L}\p{N}_]+/gu, '');
 }
 
 interface SearchIndexRow {

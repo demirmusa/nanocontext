@@ -95,6 +95,9 @@ export class SearchFormatter {
     if (telemetry) {
       lines.push(`route: ${(telemetry.fallbackPath ?? [telemetry.route]).filter(Boolean).join(' > ')}`);
       lines.push(`rerank: ${telemetry.rerankUsed === undefined ? 'n/a' : telemetry.rerankUsed ? 'yes' : 'no'}`);
+      if (telemetry.smartSearch) {
+        lines.push(...formatSmartSearchTelemetry(telemetry.smartSearch));
+      }
     }
     if (results[0]?.fallback) {
       const fallback = results[0].fallback;
@@ -144,4 +147,36 @@ function formatScoreParts(scoreParts: NonNullable<SearchResult['scoreParts']>): 
     .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
     .map(([key, value]) => `${key}=${value}`)
     .join(', ');
+}
+
+function formatSmartSearchTelemetry(smartSearch: NonNullable<NonNullable<SearchResult['searchTelemetry']>['smartSearch']>): string[] {
+  const lines = [
+    `smartSearch: ${smartSearch.enabled ? 'enabled' : 'disabled'} (${smartSearch.status})`,
+  ];
+  if (smartSearch.candidateLimit !== undefined || smartSearch.candidateCount !== undefined || smartSearch.selectedCount !== undefined) {
+    lines.push(
+      `smartSearch flow: requested=${smartSearch.requestedLimit}`
+      + `${smartSearch.candidateLimit !== undefined ? ` candidateLimit=${smartSearch.candidateLimit}` : ''}`
+      + `${smartSearch.candidateCount !== undefined ? ` candidates=${smartSearch.candidateCount}` : ''}`
+      + `${smartSearch.selectedCount !== undefined ? ` selected=${smartSearch.selectedCount}` : ''}`
+      + `${smartSearch.returnedCount !== undefined ? ` returned=${smartSearch.returnedCount}` : ''}`,
+    );
+  }
+  if (smartSearch.selectedIds?.length) {
+    lines.push(`smartSearch selectedIds: ${smartSearch.selectedIds.join(', ')}`);
+  }
+  if (smartSearch.reason) {
+    lines.push(`smartSearch reason: ${smartSearch.reason}`);
+  }
+  if (smartSearch.candidates?.length) {
+    lines.push('smartSearch candidates:');
+    for (const [index, candidate] of smartSearch.candidates.entries()) {
+      lines.push(
+        `  ${index + 1}. ${candidate.id} ${candidate.label}`
+        + `${candidate.score !== undefined ? ` score=${candidate.score}` : ''}`
+        + `${candidate.matchedBy?.length ? ` matchedBy=${candidate.matchedBy.join(',')}` : ''}`,
+      );
+    }
+  }
+  return lines;
 }

@@ -710,6 +710,32 @@ function Ensure-BenchmarkIndexedCache {
         Remove-Item $indexedPath -Recurse -Force
     }
 
+    if ($isSmartSearchEnabled) {
+        $baseIndexedPath = Ensure-BenchmarkIndexedCache -RepositoryDefinition $RepositoryDefinition -EventsPath $EventsPath
+        if ($EventsPath) {
+            Add-BenchmarkEvent -EventsPath $EventsPath -Type "indexed.smartsearch_derive_start" -Data @{
+                repository = $RepositoryDefinition.Name
+                sourcePath = $baseIndexedPath
+                indexedPath = $indexedPath
+                smartSearchEnabled = $isSmartSearchEnabled
+            }
+        }
+
+        New-Item -ItemType Directory -Path $indexedPath -Force | Out-Null
+        Get-ChildItem -LiteralPath $baseIndexedPath -Force | Copy-Item -Destination $indexedPath -Recurse -Force
+        Enable-BenchmarkSmartSearchConfig -WorkspacePath $indexedPath
+
+        if ($EventsPath) {
+            Add-BenchmarkEvent -EventsPath $EventsPath -Type "indexed.smartsearch_derive_complete" -Data @{
+                repository = $RepositoryDefinition.Name
+                sourcePath = $baseIndexedPath
+                indexedPath = $indexedPath
+                smartSearchEnabled = $isSmartSearchEnabled
+            }
+        }
+        return $indexedPath
+    }
+
     $clonePath = Ensure-BenchmarkClone -RepositoryDefinition $RepositoryDefinition -EventsPath $EventsPath
     if ($EventsPath) {
         Add-BenchmarkEvent -EventsPath $EventsPath -Type "indexed.build_start" -Data @{
@@ -733,6 +759,30 @@ function Ensure-BenchmarkIndexedCache {
         }
     }
     return $indexedPath
+}
+
+function Enable-BenchmarkSmartSearchConfig {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$WorkspacePath
+    )
+
+    $configPath = Join-Path $WorkspacePath "nanocontextconfig.json"
+    if (-not (Test-Path $configPath)) {
+        throw "NanoContext project config missing at $configPath"
+    }
+
+    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    if ($null -eq $config.search) {
+        $config | Add-Member -MemberType NoteProperty -Name search -Value ([pscustomobject]@{})
+    }
+    if ($config.search.PSObject.Properties.Name -contains 'smartSearchEnabled') {
+        $config.search.smartSearchEnabled = $true
+    } else {
+        $config.search | Add-Member -MemberType NoteProperty -Name smartSearchEnabled -Value $true
+    }
+
+    Set-Content -Path $configPath -Value ($config | ConvertTo-Json -Depth 20) -Encoding UTF8
 }
 
 function Remove-BenchmarkScaffolding {

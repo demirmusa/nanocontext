@@ -13,7 +13,7 @@
         <div class="topbar-copy">
           <p class="eyebrow">NanoContext</p>
           <h1>Benchmark Results</h1>
-          <p class="muted">Select the local <code>benchmark/runs</code> folder and inspect both aggregate trends and single-run details.</p>
+          <p class="muted">Select the local <code>benchmark/runs</code> folder and inspect task runs and single-run details.</p>
         </div>
         <div class="topbar-actions">
           <div class="hero-actions">
@@ -23,15 +23,6 @@
         </div>
       </div>
 
-      <div class="topbar-card filter-card">
-        <label for="run-filter">Run Filter</label>
-        <input id="run-filter" type="search" placeholder="Search run id / task / repo">
-      </div>
-
-      <div class="topbar-card runs-card">
-        <div class="section-title">Runs</div>
-        <div id="run-list" class="run-list"></div>
-      </div>
     </header>
 
     <main class="content">
@@ -39,21 +30,18 @@
         <div class="panel-header">
           <div>
             <p class="eyebrow">Overview</p>
-            <h2>Aggregate Analytics</h2>
+            <h2>Per Task Analytics</h2>
           </div>
-          <div id="aggregate-badges" class="badge-row"></div>
         </div>
-        <div id="aggregate-empty" class="empty-state">Select a runs folder to load analytics.</div>
+        <div id="aggregate-empty" class="empty-state">Select a runs folder to load task analytics.</div>
         <div id="aggregate-content" class="hidden">
-          <div id="aggregate-cards" class="card-grid"></div>
           <div class="table-panel">
-            <h3>Per Task Analytics</h3>
             <div class="table-wrap">
               <table id="aggregate-table">
                 <thead>
                   <tr>
                     <th>Task</th>
-                    <th>Runs</th>
+                    <th>Run</th>
                     <th>NC Token Savings</th>
                     <th>NC Non-Cached Savings</th>
                     <th>SmartSearch Token Savings</th>
@@ -68,6 +56,15 @@
         </div>
       </section>
 
+      <div class="topbar-card filter-card">
+        <label for="run-filter">Run Filter</label>
+        <input id="run-filter" type="search" placeholder="Search run id / task / repo">
+      </div>
+
+      <div class="topbar-card runs-card">
+        <div class="section-title">Runs</div>
+        <div id="run-list" class="run-list"></div>
+      </div>
       <section class="panel">
         <div class="panel-header">
           <div>

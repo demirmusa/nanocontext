@@ -740,8 +740,9 @@ test('search formatter prints compact fallback headings before grouped hits', ()
     },
   ]);
 
-  assert.match(output, /fallback: semantic from exact for "FindUser<T>" \(no exact matches\)/);
+  assert.match(output, /fallback: semantic/);
   assert.match(output, /src\/auth\.ts/);
+  assert.doesNotMatch(output, /suggestedNext|from exact|no exact matches/);
 });
 
 test('search formatter explains route matched fields and score parts', () => {
@@ -921,12 +922,12 @@ test('prepare service builds compact task context with warnings memories and nex
   const report = await service.prepare('add refresh token support', 3);
   const output = formatPrepareReport(report);
 
-  assert.match(output, /warnings: index stale: 1 changed; run nc scan/);
+  assert.match(output, /warnings: index stale: 1 changed/);
   assert.match(output, /src\/auth.ts/);
   assert.match(output, /AuthService#refreshToken/);
   assert.match(output, /test\/auth.test.ts/);
   assert.match(output, /Refresh token note/);
-  assert.match(output, /nc get src\/auth.ts/);
+  assert.doesNotMatch(output, /nc get src\/auth.ts|next:/);
   assert.doesNotMatch(output, /score=/);
   assert.doesNotMatch(output, /reason="/);
 });

@@ -12,7 +12,7 @@ export async function prepareCommand(task: string, options: { limit?: string; js
 
   try {
     await container.initialize();
-    const limit = Math.max(1, Math.min(parseInt(options.limit || '5', 10), 10));
+    const limit = Math.max(1, Math.min(parseInt(options.limit || '3', 10), 10));
     const report = await container.prepareService.prepare(task, limit);
     console.log(options.json ? JSON.stringify(report, null, 2) : formatPrepareReport(report));
   } catch (err) {

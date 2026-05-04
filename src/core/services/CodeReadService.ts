@@ -18,6 +18,15 @@ export interface ResolvedSymbolSnippetResult {
   memories?: MemoryRecord[];
 }
 
+export class AmbiguousSymbolTargetError extends Error {
+  constructor(
+    public readonly target: string,
+    public readonly resolution: SymbolResolution,
+  ) {
+    super(`Ambiguous symbol target "${target}".`);
+  }
+}
+
 export interface TargetPreviewOptions {
   around?: number;
   classContext?: boolean;
@@ -95,8 +104,11 @@ export class CodeReadService {
 
   async readSymbolSnippet(target: string): Promise<ResolvedSymbolSnippetResult> {
     const resolution = await this.resolveSymbolTarget(target);
-    if (!resolution.matched || resolution.ambiguous) {
+    if (!resolution.matched) {
       throw new Error(`No symbol match found for ${target}.`);
+    }
+    if (resolution.ambiguous) {
+      throw new AmbiguousSymbolTargetError(target, resolution);
     }
     const resolved = resolution.matched;
 
@@ -169,9 +181,39 @@ export class CodeReadService {
     }
   }
 
+  resolveIndexedFilePath(filePath: string): string | null {
+    const trimmed = filePath.trim().replace(/\\/g, '/');
+    if (!trimmed) {
+      return null;
+    }
+
+    try {
+      const { relativePath, absolutePath } = resolveProjectPath(trimmed, this.configManager.getProjectRoot());
+      if (fs.existsSync(absolutePath)) {
+        return relativePath;
+      }
+    } catch (error) {
+      if (!(error instanceof ProjectPathError)) {
+        throw error;
+      }
+    }
+
+    const lower = trimmed.toLowerCase();
+    const matches = this.stateStore.listTrackedFiles().filter(file => {
+      const normalized = file.replace(/\\/g, '/');
+      const withoutExt = normalized.replace(/\.[^/.]+$/, '');
+      return normalized.toLowerCase() === lower
+        || withoutExt.toLowerCase() === lower
+        || normalized.toLowerCase().endsWith(`/${lower}`)
+        || withoutExt.toLowerCase().endsWith(`/${lower}`);
+    });
+
+    return matches.length === 1 ? matches[0] : null;
+  }
+
   private async resolveFileScopedSymbolCandidates(target: string): Promise<SymbolCandidate[]> {
     const separatorIndex = target.indexOf('#');
-    const filePath = target.slice(0, separatorIndex);
+    const filePath = this.resolveIndexedFilePath(target.slice(0, separatorIndex)) ?? target.slice(0, separatorIndex);
     const symbol = target.slice(separatorIndex + 1).trim();
     if (!symbol) {
       return [];
@@ -227,15 +269,7 @@ export class CodeReadService {
       return false;
     }
 
-    try {
-      const { absolutePath } = resolveProjectPath(prefix, this.configManager.getProjectRoot());
-      return fs.existsSync(absolutePath);
-    } catch (error) {
-      if (error instanceof ProjectPathError) {
-        return false;
-      }
-      throw error;
-    }
+    return this.resolveIndexedFilePath(prefix) !== null;
   }
 
   private async resolveIndexedSymbolCandidates(target: string): Promise<SymbolCandidate[]> {

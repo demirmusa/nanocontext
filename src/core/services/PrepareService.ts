@@ -11,9 +11,8 @@ export interface PrepareReport {
   topResults: SearchResult[];
   relatedFiles: string[];
   symbolCandidates: string[];
-  impact?: Pick<ImpactReport, 'target' | 'callers' | 'callees' | 'possibleTests' | 'suggestedNext'>;
+  impact?: Pick<ImpactReport, 'target' | 'callers' | 'callees' | 'possibleTests'>;
   memories: MemoryRecord[];
-  suggestedNext: string[];
 }
 
 export class PrepareService {
@@ -24,7 +23,7 @@ export class PrepareService {
     private memoryStore: IMemoryStore,
   ) {}
 
-  async prepare(task: string, limit: number = 5): Promise<PrepareReport> {
+  async prepare(task: string, limit: number = 3): Promise<PrepareReport> {
     const intent = classifyPrepareIntent(task);
     const warnings: string[] = [];
     const stale = await this.staleService.inspect();
@@ -63,11 +62,9 @@ export class PrepareService {
         target: impact.target,
         callers: impact.callers.slice(0, 3),
         callees: impact.callees.slice(0, 3),
-        possibleTests: impact.possibleTests.slice(0, 5),
-        suggestedNext: impact.suggestedNext.slice(0, 3),
+        possibleTests: impact.possibleTests.slice(0, 3),
       } : undefined,
-      memories: memories.slice(0, 5),
-      suggestedNext: buildSuggestedNext(task, topResults, relatedFiles, symbolCandidates, impact),
+      memories: memories.slice(0, 3),
     };
   }
 
@@ -131,11 +128,6 @@ export function formatPrepareReport(report: PrepareReport): string {
     lines.push('memories:');
     for (const memory of report.memories) lines.push(`- ${memory.text}`);
   }
-
-  lines.push('');
-  lines.push('next:');
-  for (const command of compactNextCommands(report.suggestedNext).slice(0, 4)) lines.push(`- ${command}`);
-
   return lines.join('\n');
 }
 
@@ -145,22 +137,6 @@ function classifyPrepareIntent(task: string): PrepareReport['intent'] {
   if (/^[A-Za-z_][\w.<>#-]*$/.test(task.trim()) && /[A-Z_#.]/.test(task)) return 'symbol';
   if (/\s/.test(task)) return 'semantic';
   return 'mixed';
-}
-
-function buildSuggestedNext(
-  task: string,
-  results: SearchResult[],
-  files: string[],
-  symbols: string[],
-  impact?: Pick<ImpactReport, 'suggestedNext'>,
-): string[] {
-  return unique([
-    ...results.map(result => result.suggestedNext).filter(Boolean) as string[],
-    ...files.slice(0, 1).map(file => `nc get ${file}`),
-    ...symbols.slice(0, 1).map(symbol => `nc impact ${symbol}`),
-    ...(impact?.suggestedNext ?? []),
-    `nc search "${task}"`,
-  ]).slice(0, 6);
 }
 
 function unique(values: string[]): string[] {
@@ -192,7 +168,7 @@ function formatPrepareStaleWarning(stale: Awaited<ReturnType<StaleService['inspe
   ].filter(Boolean);
 
   const summary = parts.length > 0 ? parts.join(', ') : `${actionable.length} index issues`;
-  return `index stale: ${summary}; run ${stale.suggestedNext[0] ?? 'nc stale'}`;
+  return `index stale: ${summary}`;
 }
 
 function formatResultSymbol(result: SearchResult): string {
@@ -200,23 +176,4 @@ function formatResultSymbol(result: SearchResult): string {
     return result.class && result.method ? `${result.class}#${result.method}` : result.method ?? '';
   }
   return result.class ?? '';
-}
-
-function compactNextCommands(commands: string[]): string[] {
-  const seenKinds = new Set<string>();
-  const result: string[] = [];
-
-  for (const command of commands) {
-    const kind = command.startsWith('nc get ') ? 'get'
-      : command.startsWith('nc impact ') ? 'impact'
-        : command.startsWith('nc callers ') ? 'callers'
-          : command.startsWith('nc callees ') ? 'callees'
-            : command.startsWith('nc search ') ? 'search'
-              : command;
-    if (seenKinds.has(kind)) continue;
-    seenKinds.add(kind);
-    result.push(command);
-  }
-
-  return result;
 }

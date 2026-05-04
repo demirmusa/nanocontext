@@ -125,19 +125,6 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
     },
   },
   {
-    name: 'symbol',
-    description: 'Resolve a symbol name to ranked candidates.',
-    params: '`query`',
-    docsDescription: 'Resolve a symbol name, qualified name, or `Type#Member` target.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Symbol query' },
-      },
-      required: ['query'],
-    },
-  },
-  {
     name: 'files',
     description: 'List indexed files or search them by partial name.',
     params: '`query?`',

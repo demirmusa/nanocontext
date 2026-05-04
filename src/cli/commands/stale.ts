@@ -53,14 +53,6 @@ function printStaleReport(report: StaleReport, compact: boolean = false): void {
       }
     }
   }
-
-  if (report.suggestedNext.length > 0) {
-    console.log('');
-    console.log(colors.dim('Next:'));
-    for (const next of report.suggestedNext) {
-      console.log(colors.dim(`  ${next}`));
-    }
-  }
 }
 
 function printCompactReport(report: StaleReport): void {
@@ -72,9 +64,6 @@ function printCompactReport(report: StaleReport): void {
   }
   if (report.issues.length > 30) {
     console.log(`more=${report.issues.length - 30}`);
-  }
-  if (report.suggestedNext.length > 0) {
-    console.log(`next=${report.suggestedNext.join(' | ')}`);
   }
 }
 

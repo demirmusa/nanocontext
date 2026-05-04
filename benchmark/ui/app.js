@@ -11,8 +11,6 @@ const runFilter = document.querySelector('#run-filter');
 const runList = document.querySelector('#run-list');
 const aggregateEmpty = document.querySelector('#aggregate-empty');
 const aggregateContent = document.querySelector('#aggregate-content');
-const aggregateCards = document.querySelector('#aggregate-cards');
-const aggregateBadges = document.querySelector('#aggregate-badges');
 const aggregateTableBody = document.querySelector('#aggregate-table tbody');
 const selectedRunEmpty = document.querySelector('#selected-run-empty');
 const selectedRunContent = document.querySelector('#selected-run-content');
@@ -60,6 +58,7 @@ runFilter?.addEventListener('input', () => {
   }
 
   renderRunList();
+  renderAggregate();
   renderSelectedRun();
 });
 
@@ -99,47 +98,31 @@ function renderAggregate() {
   if (!state.runs.length) {
     aggregateEmpty.classList.remove('hidden');
     aggregateContent.classList.add('hidden');
-    aggregateBadges.innerHTML = '';
     return;
   }
 
   aggregateEmpty.classList.add('hidden');
   aggregateContent.classList.remove('hidden');
 
-  const analytics = buildAggregateAnalytics(state.runs);
-  aggregateBadges.innerHTML = '';
-  aggregateCards.innerHTML = '';
   aggregateTableBody.innerHTML = '';
 
-  const badgeItems = [
-    `${analytics.totalRuns} total runs`,
-    `${analytics.totalTasks} unique tasks`,
-    `${analytics.totalRepositories} repos`,
-  ];
-  badgeItems.forEach((label) => aggregateBadges.appendChild(createBadge(label)));
-
-  [
-    ['NC Avg Token Savings', formatPercent(analytics.nanocontext.avgSavingsRatio), 'baseline total token spend reduction'],
-    ['NC Avg Non-Cached Savings', formatPercent(analytics.nanocontext.avgNonCachedSavingsRatio), 'baseline spend excluding cached input'],
-    ['SmartSearch Avg Token Savings', formatPercent(analytics.smartsearch.avgSavingsRatio), 'baseline total token spend reduction'],
-    ['SmartSearch Avg Non-Cached Savings', formatPercent(analytics.smartsearch.avgNonCachedSavingsRatio), 'baseline spend excluding cached input'],
-    ['Smart vs NC Gain', formatPercent(analytics.smartsearch.avgSavingsVsNanoRatio), 'extra reduction vs normal NC'],
-    ['Smart vs NC Non-Cached Gain', formatPercent(analytics.smartsearch.avgNonCachedSavingsVsNanoRatio), 'extra non-cached reduction vs normal NC'],
-  ].forEach(([label, value, subtext]) => {
-    aggregateCards.appendChild(createMetricCard(label, value, subtext));
-  });
-
-  for (const task of analytics.tasks) {
+  for (const run of state.filteredRuns) {
     const row = document.createElement('tr');
     row.innerHTML = `
-      <td>${escapeHtml(task.benchmarkId)}<br><span class="tiny">${escapeHtml(task.repository)} · ${escapeHtml(task.taskKey)}</span></td>
-      <td>${task.runCount}</td>
-      <td>${formatPercent(task.nanocontext.avgSavingsRatio)}</td>
-      <td>${formatPercent(task.nanocontext.avgNonCachedSavingsRatio)}</td>
-      <td>${formatPercent(task.smartsearch.avgSavingsRatio)}</td>
-      <td>${formatPercent(task.smartsearch.avgNonCachedSavingsRatio)}</td>
-      <td>${formatPercent(task.smartsearch.avgSavingsVsNanoRatio)}</td>
+      <td>${escapeHtml(run.benchmarkId)}<br><span class="tiny">${escapeHtml(run.repository)} · ${escapeHtml(run.taskKey)}</span></td>
+      <td>${escapeHtml(run.runId)}<br><span class="tiny">${formatTimestamp(run.completedAt)}</span></td>
+      <td>${formatPercent(tokenSavingsRatio(run.conditions.baseline?.usage, run.conditions.nanocontext?.usage))}</td>
+      <td>${formatPercent(nonCachedSavingsRatio(run.conditions.baseline?.usage, run.conditions.nanocontext?.usage))}</td>
+      <td>${formatPercent(tokenSavingsRatio(run.conditions.baseline?.usage, run.conditions['nanocontext-smartsearch']?.usage))}</td>
+      <td>${formatPercent(nonCachedSavingsRatio(run.conditions.baseline?.usage, run.conditions['nanocontext-smartsearch']?.usage))}</td>
+      <td>${formatPercent(tokenSavingsRatio(run.conditions.nanocontext?.usage, run.conditions['nanocontext-smartsearch']?.usage))}</td>
     `;
+    row.addEventListener('click', () => {
+      state.selectedRunId = run.runId;
+      state.focusedCondition = null;
+      renderRunList();
+      renderSelectedRun();
+    });
     aggregateTableBody.appendChild(row);
   }
 }
@@ -242,94 +225,6 @@ async function getFileHandleByPath(rootHandle, relativePath) {
   }
 
   return currentHandle.getFileHandle(parts.at(-1));
-}
-
-function buildAggregateAnalytics(runs) {
-  const taskMap = new Map();
-  const repos = new Set();
-
-  for (const run of runs) {
-    repos.add(run.repository);
-    const key = run.benchmarkId;
-    if (!taskMap.has(key)) {
-      taskMap.set(key, {
-        benchmarkId: run.benchmarkId,
-        repository: run.repository,
-        taskKey: run.taskKey,
-        runCount: 0,
-        baselineTokens: [],
-        baselineNonCached: [],
-        nanocontextTokens: [],
-        nanocontextNonCached: [],
-        smartsearchTokens: [],
-        smartsearchNonCached: [],
-      });
-    }
-
-    const task = taskMap.get(key);
-    task.runCount += 1;
-    if (run.conditions.baseline) {
-      task.baselineTokens.push(totalTokens(run.conditions.baseline.usage));
-      task.baselineNonCached.push(nonCachedTokens(run.conditions.baseline.usage));
-    }
-    if (run.conditions.nanocontext) {
-      task.nanocontextTokens.push(totalTokens(run.conditions.nanocontext.usage));
-      task.nanocontextNonCached.push(nonCachedTokens(run.conditions.nanocontext.usage));
-    }
-    if (run.conditions['nanocontext-smartsearch']) {
-      task.smartsearchTokens.push(totalTokens(run.conditions['nanocontext-smartsearch'].usage));
-      task.smartsearchNonCached.push(nonCachedTokens(run.conditions['nanocontext-smartsearch'].usage));
-    }
-  }
-
-  const tasks = Array.from(taskMap.values()).map((task) => {
-    const baselineAvg = average(task.baselineTokens);
-    const baselineNonCachedAvg = average(task.baselineNonCached);
-    const nanocontextAvg = average(task.nanocontextTokens);
-    const nanocontextNonCachedAvg = average(task.nanocontextNonCached);
-    const smartsearchAvg = average(task.smartsearchTokens);
-    const smartsearchNonCachedAvg = average(task.smartsearchNonCached);
-    return {
-      ...task,
-      baseline: {
-        avgTokens: baselineAvg,
-        avgNonCachedTokens: baselineNonCachedAvg,
-      },
-      nanocontext: {
-        avgTokens: nanocontextAvg,
-        avgSavingsRatio: deltaRatioOrNull(baselineAvg, nanocontextAvg),
-        avgNonCachedTokens: nanocontextNonCachedAvg,
-        avgNonCachedSavingsRatio: deltaRatioOrNull(baselineNonCachedAvg, nanocontextNonCachedAvg),
-      },
-      smartsearch: {
-        avgTokens: smartsearchAvg,
-        avgSavingsRatio: deltaRatioOrNull(baselineAvg, smartsearchAvg),
-        avgNonCachedTokens: smartsearchNonCachedAvg,
-        avgNonCachedSavingsRatio: deltaRatioOrNull(baselineNonCachedAvg, smartsearchNonCachedAvg),
-        avgSavingsVsNanoRatio: deltaRatioOrNull(nanocontextAvg, smartsearchAvg),
-        avgNonCachedSavingsVsNanoRatio: deltaRatioOrNull(nanocontextNonCachedAvg, smartsearchNonCachedAvg),
-      },
-    };
-  }).sort((a, b) => a.benchmarkId.localeCompare(b.benchmarkId));
-
-  return {
-    totalRuns: runs.length,
-    totalTasks: tasks.length,
-    totalRepositories: repos.size,
-    nanocontext: {
-      count: tasks.length,
-      avgSavingsRatio: average(tasks.map((task) => task.nanocontext.avgSavingsRatio).filter(Number.isFinite)),
-      avgNonCachedSavingsRatio: average(tasks.map((task) => task.nanocontext.avgNonCachedSavingsRatio).filter(Number.isFinite)),
-    },
-    smartsearch: {
-      count: tasks.length,
-      avgSavingsRatio: average(tasks.map((task) => task.smartsearch.avgSavingsRatio).filter(Number.isFinite)),
-      avgNonCachedSavingsRatio: average(tasks.map((task) => task.smartsearch.avgNonCachedSavingsRatio).filter(Number.isFinite)),
-      avgSavingsVsNanoRatio: average(tasks.map((task) => task.smartsearch.avgSavingsVsNanoRatio).filter(Number.isFinite)),
-      avgNonCachedSavingsVsNanoRatio: average(tasks.map((task) => task.smartsearch.avgNonCachedSavingsVsNanoRatio).filter(Number.isFinite)),
-    },
-    tasks,
-  };
 }
 
 function renderConditionPanel(conditionName, summary) {
@@ -472,17 +367,6 @@ function hasUsage(usage) {
   return Boolean(usage)
     && Number.isFinite(Number(usage.input_tokens))
     && Number.isFinite(Number(usage.output_tokens));
-}
-
-function summarizeUsage(usage) {
-  if (!usage) return 'No usage recorded';
-  return `in ${formatNumber(usage.input_tokens)} · out ${formatNumber(usage.output_tokens)} · cached ${formatNumber(usage.cached_input_tokens)}`;
-}
-
-function average(values) {
-  const filtered = values.filter(Number.isFinite);
-  if (!filtered.length) return null;
-  return filtered.reduce((sum, value) => sum + value, 0) / filtered.length;
 }
 
 function ratioOrNull(numerator, denominator) {

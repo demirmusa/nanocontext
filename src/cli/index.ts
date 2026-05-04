@@ -11,7 +11,6 @@ import { statusCommand } from './commands/status';
 import { mcpServerCommand } from './commands/mcp-server';
 import { getCommand } from './commands/get';
 import { peekCommand } from './commands/peek';
-import { symbolCommand } from './commands/symbol';
 import { filesCommand } from './commands/files';
 import { refsCommand } from './commands/refs';
 import { callersCommand } from './commands/callers';
@@ -109,11 +108,11 @@ program
   .command('search [query]')
   .alias('s')
   .description('Search codebase (exact text by default)')
-  .option('-q, --query <query...>', 'Run multiple queries in one command')
+  .option('-f, --file <path>', 'Search methods/classes inside one file')
   .option('-v, --vector', 'Use vector/semantic search')
   .option('-d, --deep', 'Include full data: sigs, refs, insights (use with -v or -r)')
   .option('-r, --regex', 'Regex search on names/signatures')
-  .option('-l, --limit <number>', 'Max results', '3')
+  .option('-l, --limit <number>', 'Max results')
   .option('--explain', 'Explain route, ranking, matched fields, and Smart Search selection')
   .action(searchCommand);
 
@@ -122,6 +121,7 @@ program
   .alias('g')
   .description('Get a compact file summary or raw lines (e.g. nc get myfile.cs, nc get myfile.cs[76-89])')
   .option('--around <lines>', 'Expand ranged or symbol reads by N surrounding lines')
+  .option('--full', 'Print the full file outline for file summary targets')
   .action(getCommand);
 
 program
@@ -141,15 +141,8 @@ program
 
 
 program
-  .command('symbol [query]')
-  .description('Resolve a symbol name to ranked candidates')
-  .option('-q, --query <query...>', 'Resolve multiple symbol queries in one command')
-  .action(symbolCommand);
-
-program
   .command('files [query]')
   .description('List indexed files or search them by partial name')
-  .option('-q, --query <query...>', 'Search multiple filename queries in one command')
   .action(filesCommand);
 
 program

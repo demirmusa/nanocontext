@@ -4,8 +4,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
-const { formatCompactSnippetLines } = require('../dist/cli/commands/get');
+const {
+  formatCompactSnippetLines,
+  formatBoundedSnippetLines,
+  formatCompactMethodLines,
+  formatSymbolCandidateLines,
+} = require('../dist/cli/commands/get');
 const { buildSearchRequest } = require('../dist/cli/commands/searchRequest');
+const { collectQueries, findFileSearchMatches, resolveImplicitBatchLimit } = require('../dist/cli/commands/search');
+const { collectFileQueries } = require('../dist/cli/commands/files');
 const { FileDiscoveryService } = require('../dist/core/services/FileDiscoveryService');
 const { buildIgnoreEntry } = require('../dist/cli/commands/ignore');
 
@@ -24,7 +31,7 @@ test('cli help exposes header, peek, and get read primitives', () => {
   assert.match(output, /\bheader\b/);
   assert.match(output, /\bpeek\b/);
   assert.match(output, /\bget\b/);
-  assert.match(output, /\bsymbol\b/);
+  assert.doesNotMatch(output, /^\s+symbol\b/m);
   assert.match(output, /\bfiles\b/);
   assert.match(output, /\brefs\b/);
   assert.match(output, /\bcallers\b/);
@@ -109,16 +116,15 @@ test('memory command help exposes file-scoped flags', () => {
   assert.match(memoriesHelp, /--symbol <query>/);
 });
 
-test('lookup command help exposes batched query flags', () => {
+test('lookup command help exposes file-scoped and explain flags without query flag', () => {
   const cliPath = path.join(__dirname, '..', 'dist', 'cli', 'index.js');
   const searchHelp = execFileSync(process.execPath, [cliPath, 'search', '--help'], { encoding: 'utf-8' });
-  const symbolHelp = execFileSync(process.execPath, [cliPath, 'symbol', '--help'], { encoding: 'utf-8' });
   const filesHelp = execFileSync(process.execPath, [cliPath, 'files', '--help'], { encoding: 'utf-8' });
 
-  assert.match(searchHelp, /--query <query\.\.\.>/);
+  assert.doesNotMatch(searchHelp, /--query/);
+  assert.match(searchHelp, /--file <path>/);
   assert.match(searchHelp, /--explain/);
-  assert.match(symbolHelp, /--query <query\.\.\.>/);
-  assert.match(filesHelp, /--query <query\.\.\.>/);
+  assert.doesNotMatch(filesHelp, /--query/);
 });
 
 test('search explain uses the same default request shape', () => {
@@ -142,6 +148,81 @@ test('search explain uses the same default request shape', () => {
       typeFilter: 'all',
     },
   );
+});
+
+test('search query collection splits pipe-delimited batch queries', () => {
+  assert.deepEqual(
+    collectQueries('SetupCommand|GetTypeDeserializer', ['GetDeserializer|CreateParamInfoGenerator', 'SetupCommand']),
+    ['SetupCommand', 'GetTypeDeserializer', 'GetDeserializer', 'CreateParamInfoGenerator'],
+  );
+});
+
+test('batch search lowers implicit per-query limit but honors explicit limit', () => {
+  assert.equal(resolveImplicitBatchLimit(1), 3);
+  assert.equal(resolveImplicitBatchLimit(4), 2);
+  assert.equal(resolveImplicitBatchLimit(9), 1);
+  assert.equal(resolveImplicitBatchLimit(9, '5'), 5);
+});
+
+test('files query collection splits pipe-delimited batch queries', () => {
+  assert.deepEqual(
+    collectFileQueries('AuthService|UserService', ['OrderService']),
+    ['AuthService', 'UserService', 'OrderService'],
+  );
+});
+
+test('file-scoped search limits matching symbols by default and reports truncation', () => {
+  const methods = Array.from({ length: 12 }, (_, index) => ({
+    name: 'QueryAsync',
+    class: 'SqlMapper',
+    loc: `${index + 1}-${index + 1}`,
+    sig: `public static QueryAsync(${index})`,
+  }));
+  const content = methods.map(method => method.sig).join('\n');
+
+  const { matches, total, truncated } = findFileSearchMatches([], methods, content, 'QueryAsync');
+
+  assert.equal(matches.length, 5);
+  assert.equal(matches.filter(item => item.kind === 'method').length, 5);
+  assert.equal(total, 12);
+  assert.equal(truncated, true);
+});
+
+test('file-scoped search honors explicit limit', () => {
+  const methods = Array.from({ length: 12 }, (_, index) => ({
+    name: 'QueryAsync',
+    class: 'SqlMapper',
+    loc: `${index + 1}-${index + 1}`,
+    sig: `public static QueryAsync(${index})`,
+  }));
+  const content = methods.map(method => method.sig).join('\n');
+
+  const { matches, total, truncated } = findFileSearchMatches([], methods, content, 'QueryAsync', 10);
+
+  assert.equal(matches.length, 10);
+  assert.equal(total, 12);
+  assert.equal(truncated, true);
+});
+
+test('file-scoped search also returns raw text matches outside symbol metadata', () => {
+  const methods = [{
+    name: 'Run',
+    class: 'Worker',
+    loc: '1-3',
+    sig: 'public void Run()',
+  }];
+  const content = [
+    'public void Run()',
+    '{',
+    '}',
+    'const marker = "QueryAsync";',
+  ].join('\n');
+
+  const { matches, total, truncated } = findFileSearchMatches([], methods, content, 'QueryAsync');
+
+  assert.deepEqual(matches, [{ kind: 'line', line: 4, text: 'const marker = "QueryAsync";' }]);
+  assert.equal(total, 1);
+  assert.equal(truncated, false);
 });
 
 test('watch command help exposes detached and list modes without stop id', () => {
@@ -170,6 +251,52 @@ test('get range renderer keeps only first and last line numbers for longer snipp
   assert.match(output[0], /10.*alpha/);
   assert.equal(output[1], 'beta');
   assert.match(output[2], /12.*gamma/);
+});
+
+test('get range renderer bounds long snippets by default', () => {
+  const content = Array.from({ length: 120 }, (_, index) => `line-${index + 1}`).join('\n');
+  const output = formatBoundedSnippetLines(content, 1, 10);
+  const joined = output.join('\n');
+
+  assert.match(joined, /omitted 110 lines; use --full/);
+  assert.match(joined, /line-1/);
+  assert.match(joined, /line-120/);
+  assert.equal(output.length, 11);
+});
+
+test('get file summary limits methods including overloads', () => {
+  const methods = [
+    ...Array.from({ length: 8 }, (_, index) => ({
+      name: `Single${index + 1}`,
+      loc: `${index + 1}-${index + 1}`,
+    })),
+    ...Array.from({ length: 4 }, (_, index) => ({
+      name: 'Load',
+      class: 'Mapper',
+      loc: `${20 + index}-${20 + index}`,
+      sig: `public void Load(int value${index})`,
+    })),
+  ];
+
+  const output = formatCompactMethodLines(methods, 10);
+  const joined = output.join('\n');
+
+  assert.equal(output.filter(line => /Single\d|Load\(int value/.test(line)).length, 10);
+  assert.match(joined, /Mapper\.Load: \[4 overload\]/);
+  assert.match(joined, /\.\.\./);
+  assert.doesNotMatch(joined, /value2/);
+});
+
+test('get symbol candidates omit overload count header', () => {
+  const output = formatSymbolCandidateLines([
+    { sig: 'private static async MultiMapAsync()', loc: '931-950' },
+    { sig: 'private static async MultiMapAsync(Type[] types)', loc: '975-998' },
+  ]);
+
+  assert.deepEqual(output, [
+    'private static async MultiMapAsync()[931-950]',
+    'private static async MultiMapAsync(Type[] types)[975-998]',
+  ]);
 });
 
 test('file discovery service lists and filters indexed files by partial name', () => {

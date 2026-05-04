@@ -60,13 +60,6 @@ function printImpactReport(report: ImpactReport): void {
     }
   }
 
-  if (report.suggestedNext.length > 0) {
-    console.log('');
-    console.log(colors.dim('Next:'));
-    for (const next of report.suggestedNext) {
-      console.log(colors.dim(`  ${next}`));
-    }
-  }
 }
 
 function printRisk(level: 'high' | 'medium' | 'low', reason: string): void {
@@ -112,8 +105,7 @@ function printRelations(title: string, relations: TraceRelation[]): void {
   }
 
   for (const relation of relations) {
-    const reason = relation.reason ? colors.dim(` ${relation.reason}`) : '';
-    console.log(`  ${relation.symbol} ${colors.dim(`${relation.path} [${relation.range}] (${relation.confidence})`)}${reason}`);
+    console.log(`  ${relation.symbol} ${colors.dim(`${relation.path} [${relation.range}]`)}`);
   }
 }
 
@@ -126,7 +118,7 @@ function printTests(tests: TestCandidate[]): void {
   }
 
   for (const test of tests) {
-    console.log(`  ${test.file} ${colors.dim(`(${test.confidence}) ${test.reason}`)}`);
+    console.log(`  ${test.file} ${colors.dim(`(${test.confidence})`)}`);
   }
 }
 

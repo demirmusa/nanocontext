@@ -51,18 +51,17 @@ export function printStateReferences(refs: StateReference[], emptyLabel: string)
   }
 
   for (const ref of refs) {
-    const symbol = ref.symbol ? ` ${colors.dim(`in ${ref.symbol}`)}` : '';
-    const context = ref.context ? colors.dim(` ${ref.context}`) : '';
-    console.log(`${ref.path} ${colors.dim(`${ref.file} [${ref.range}] (${ref.kind})`)}${symbol}${context}`);
+    const symbol = ref.symbol ? ` ${colors.dim(ref.symbol)}` : '';
+    console.log(`${ref.path} ${colors.dim(`${ref.file} [${ref.range}] ${ref.kind}`)}${symbol}`);
   }
 }
 
 function parseLimit(value?: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 50;
+    return 3;
   }
-  return Math.min(Math.floor(parsed), 200);
+  return Math.min(Math.floor(parsed), 10);
 }
 
 function parseKind(value?: string): 'read' | 'write' | undefined {

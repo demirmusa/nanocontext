@@ -140,7 +140,7 @@ This project uses **NanoContext**, a code intelligence MCP server that provides 
 - When using NanoContext tools, do NOT add commentary or explanations about the tool calls. Execute them silently and use the results directly.
 - All file paths (f param) MUST be relative to project root. Never use absolute paths.
 - At the beginning of a session, call \`watch\` once so changed files are auto-indexed in the background.
-- Do not use shell file readers such as \`sed\`, \`cat\`, \`grep\`, \`rg\`, or \`Get-Content\` for initial code discovery. Use NanoContext \`search\`, \`symbol\`, \`files\`, \`code\`, \`refs\`, \`callers\`, \`callees\`, \`trace\`, and \`impact\` first.
+- Do not use shell file readers such as \`sed\`, \`cat\`, \`grep\`, \`rg\`, or \`Get-Content\` for initial code discovery. Use NanoContext \`search\`, \`files\`, \`code\`, \`refs\`, \`callers\`, \`callees\`, \`trace\`, and \`impact\` first.
 - Use raw file reads only after NanoContext has identified a precise file or line range and only when the NanoContext \`code\` tool or header resources are insufficient.
 
 ### Tools
@@ -163,8 +163,8 @@ NanoContext has a persistent memory store that survives across sessions. Use it 
 ### Workflow
 
 1. **Session start**: Call \`watch\`, then call \`memories\` once to load previous context.
-2. **Before editing**: Start with \`search\`, \`symbol\`, or \`files\`, then open one strong hit with \`get\` or a header resource. Stop searching when one result is clearly right.
-   Prefer one batched query call such as repeated query args over shell chaining multiple commands.
+2. **Before editing**: Start with \`search\` or \`files\`, then open one strong hit with \`get\` or a header resource. Stop searching when one result is clearly right.
+   Prefer one batched search query such as \`A|B|C\` over shell chaining multiple commands.
 3. **Before risky edits**: Call \`impact\` on the file or symbol to review callers, callees, likely tests, and memory notes.
 4. **After editing**: Let the background watcher refresh changed files. Call \`stale\` if you suspect the index is behind.
 5. **Important findings**: Call \`remember\` to persist context for future sessions
@@ -172,9 +172,9 @@ NanoContext has a persistent memory store that survives across sessions. Use it 
 
 ### Playbooks
 
-- **Trace task**: \`search\` / \`symbol\` -> \`get\` -> \`refs\` / \`callees\` / \`trace\`
-- **Edit discovery**: \`search\` / \`symbol\` / \`files\` -> \`get <file>\` -> \`open <symbol>\`
-- **Impact review**: \`search\` / \`symbol\` -> \`callers\` / \`callees\` -> \`refs\`
+- **Trace task**: \`search\` -> \`get\` -> \`refs\` / \`callees\` / \`trace\`
+- **Edit discovery**: \`search\` / \`files\` -> \`get <file>\` or \`get <file>#<method>\`
+- **Impact review**: \`search\` -> \`callers\` / \`callees\` -> \`refs\`
 - **Change impact**: \`impact\` -> open likely callers/tests -> edit
 - **Durable notes**: \`remember\` with \`symbol\` for method/class notes, \`file\` for file-wide notes
 ${NANOCONTEXT_SECTION_END}`;
@@ -191,17 +191,18 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 - \`nc watch -d\`: Start background auto-indexing for this project.
 - \`nc agent-start\`: Run this once at session start. It starts background auto-indexing and prints project memories in one command.
 - \`nc search "<query>"\`: Perform text search across the codebase.
-- \`nc search --query "<a>" --query "<b>"\`: Batch related searches in one safe command instead of using shell chaining.
+- \`nc search "<a>|<b>|<c>"\`: Batch related searches in one safe command instead of using shell chaining.
+- \`nc search -f <file> "<query>"\`: Search methods/classes inside one file.
 - \`nc search -v "<query>"\`: Perform semantic search.
 - \`nc search -d "<pattern>"\`: Perform dependency or deep regex search.
-- \`nc symbol <query>\` / \`nc symbol --query "<a>" --query "<b>"\`: Resolve one or more symbols directly.
-- \`nc files [query]\` / \`nc files --query "<a>" --query "<b>"\`: List indexed files or search them by partial name.
+- \`nc files [query]\` / \`nc files "<a>|<b>|<c>"\`: List indexed files or batch partial filename searches.
 - \`nc remember "<text>"\`: Save important project context and architectural decisions.
 - \`nc remember "<text>" --symbol "<Type#Member>"\`: Save a symbol-scoped note for one method or class.
 - \`nc memories\`: View saved memories.
 - \`nc memories --symbol "<Type#Member>"\`: View notes attached to one method or class.
 - \`nc status\`: View indexing status and project stats.
 - \`nc get <file>\`: Show a compact file summary with imports, classes, and methods.
+- \`nc get <file>#<method>\`: Show matching method locations in a file; if exactly one match exists, read it.
 - \`nc get <file>[<start>-<end>]\`: Read raw file lines for a precise range.
 - \`nc refs <symbol>\` / \`nc callers <symbol>\` / \`nc callees <symbol>\` / \`nc trace <symbol>\`: Walk code flow intentionally.
 - \`nc impact <file_or_symbol>\`: Review callers, callees, same-file symbols, likely tests, and memory notes before a risky edit.
@@ -213,10 +214,10 @@ You can run \`nc --help\` or \`nc <command> --help\` for details. Basic commands
 
 - When using NanoContext tools, execute them using the CLI directly.
 - Never call bare tool names such as \`memories\`, \`remember\`, \`forget\`, \`search\`, or \`status\`. In CLI mode, always invoke NanoContext through \`nc <command>\`.
-- Prefer tool-native batching such as repeated \`--query\` flags instead of shell composition like \`cmd1 && cmd2\` or \`cmd1 | cmd2\`.
+- Prefer tool-native batching such as \`nc search "A|B|C"\` instead of shell composition like \`cmd1 && cmd2\` or \`cmd1 | cmd2\`.
 - At the beginning of a session, run \`nc agent-start\` once so changed files are auto-indexed in the background and saved memories are loaded. Do not repeatedly call \`nc memories\`.
 - All file paths MUST be relative to project root. Never use absolute paths.
-- Do not use shell file readers such as \`sed\`, \`cat\`, \`grep\`, \`rg\`, or \`Get-Content\` for initial code discovery. Start with \`nc search\`, \`nc symbol\`, \`nc files\`, \`nc get\`, \`nc refs\`, \`nc callers\`, \`nc callees\`, \`nc trace\`, or \`nc impact\`.
+- Do not use shell file readers such as \`sed\`, \`cat\`, \`grep\`, \`rg\`, or \`Get-Content\` for initial code discovery. Start with \`nc search\`, \`nc files\`, \`nc get\`, \`nc refs\`, \`nc callers\`, \`nc callees\`, \`nc trace\`, or \`nc impact\`.
 - Use raw shell file reads only after NanoContext has narrowed the target and \`nc get <file>[start-end]\` is not enough.
 
 ### Memory
@@ -232,16 +233,16 @@ NanoContext has a persistent memory store that survives across sessions. Use it 
 ### Workflow
 
 1. **Session start**: Run \`nc agent-start\` once
-2. **Before editing**: Use \`nc search\`, \`nc symbol\`, or \`nc files\` to find the target, then \`nc get <file>\` to inspect it
+2. **Before editing**: Use \`nc search\` or \`nc files\` to find the target, then \`nc get <file>\` or \`nc get <file>#<method>\` to inspect it
 3. **Before risky edits**: Run \`nc impact <file_or_symbol>\` to review callers, callees, likely tests, and memory notes.
 4. **After editing**: Let the background watcher refresh changed files. Run \`nc stale\` if results look incomplete.
 5. **Important findings**: Call \`nc remember\` to persist context
 
 ### Playbooks
 
-- **Trace task**: \`nc search\` / \`nc symbol\` -> \`nc get <file>\` -> \`nc refs <symbol>\` / \`nc callees <symbol>\` / \`nc trace <symbol>\`
-- **Edit discovery**: \`nc search\` / \`nc symbol\` / \`nc files\` -> \`nc get <file>\`
-- **Review/impact**: \`nc search\` / \`nc symbol\` -> \`nc impact <file_or_symbol>\` -> \`nc get <likely_target>\`
+- **Trace task**: \`nc search\` -> \`nc get <file>\` -> \`nc refs <symbol>\` / \`nc callees <symbol>\` / \`nc trace <symbol>\`
+- **Edit discovery**: \`nc search\` / \`nc files\` -> \`nc get <file>\` or \`nc get <file>#<method>\`
+- **Review/impact**: \`nc search\` -> \`nc impact <file_or_symbol>\` -> \`nc get <likely_target>\`
 - **Durable notes**: \`nc remember --symbol\` for method/class notes, \`nc remember -f\` for file-wide notes
 ${NANOCONTEXT_SECTION_END}`;
   }

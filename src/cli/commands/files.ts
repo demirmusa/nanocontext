@@ -10,7 +10,7 @@ export async function filesCommand(query: string | undefined, options: { query?:
 
   try {
     await container.initialize();
-    const queries = collectQueries(query, options.query);
+    const queries = collectFileQueries(query, options.query);
     const batches = queries.length > 0 ? queries : [undefined];
 
     for (const [index, currentQuery] of batches.entries()) {
@@ -30,10 +30,6 @@ export async function filesCommand(query: string | undefined, options: { query?:
       for (const file of files) {
         console.log(file);
       }
-
-      if (files.length === 1) {
-        console.log(colors.dim(`next: nc get ${files[0]}`));
-      }
     }
   } catch (err) {
     console.error(colors.red(`Files failed: ${err}`));
@@ -43,10 +39,12 @@ export async function filesCommand(query: string | undefined, options: { query?:
   }
 }
 
-function collectQueries(query: string | undefined, batchQueries?: string[]): string[] {
+export function collectFileQueries(query: string | undefined, batchQueries?: string[]): string[] {
   const values = [
     ...(query ? [query] : []),
     ...(batchQueries ?? []),
-  ].map(item => item.trim()).filter(Boolean);
+  ].flatMap(item => item.split('|'))
+    .map(item => item.trim())
+    .filter(Boolean);
   return [...new Set(values)];
 }

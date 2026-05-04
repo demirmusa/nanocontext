@@ -36,7 +36,7 @@ nc scan       # index the codebase
 nc agent-start
 nc s "auth"   # search instantly
 nc symbol AuthService#BuildToken
-nc search --query "AuthService" --query "BuildToken"
+nc search "AuthService|BuildToken"
 nc symbol --query "AuthService#BuildToken" --query "QueryAsync"
 nc files "AuthService"
 ```
@@ -44,7 +44,7 @@ nc files "AuthService"
 `nc init` sets up agent-specific config and project instructions. `nc scan` builds the first project index. After that, supported agents in this repo can use NanoContext automatically as their code-navigation layer.
 
 When exact search misses, NanoContext retries a normalized exact form and then semantic search automatically. Fallback hits are labeled in the output so agents can tell recovery results from direct exact matches.
-For related lookups, prefer tool-native batching such as `nc search --query "A" --query "B"` instead of shell chaining like `cmd1 && cmd2` or pipelines.
+For related lookups, prefer tool-native batching such as `nc search "A|B|C"` instead of shell chaining like `cmd1 && cmd2` or pipelines.
 Normal `nc search` output stays compact: top hit first, then `next:` / `related:` / `memory:` context when available.
 
 ## AI-First Workflow
@@ -145,7 +145,7 @@ nc s "get.*User" -r                   # regex on names/signatures
 nc s "authentication logic" -v        # semantic vector search
 nc s "database connection" -v -d      # deep vector search (full header data)
 nc s "error handling" -l 10           # limit results (default: 3)
-nc search --query "FAQ" --query "Firebase"
+nc search "FAQ|Firebase"
 ```
 
 ### Read code

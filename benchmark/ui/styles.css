@@ -286,6 +286,14 @@ th {
   letter-spacing: 0.08em;
 }
 
+#aggregate-table tbody tr {
+  cursor: pointer;
+}
+
+#aggregate-table tbody tr:hover {
+  background: rgba(21, 94, 117, 0.08);
+}
+
 .condition-panel {
   padding: 20px;
   min-width: 0;

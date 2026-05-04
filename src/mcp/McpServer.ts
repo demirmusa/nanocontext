@@ -50,6 +50,52 @@ function shortResults(results: Record<string, unknown>[]): Record<string, unknow
   return results.map(r => shorten(r));
 }
 
+function shortTraceRelation(item: { symbol: string; path: string; range: string }): Record<string, unknown> {
+  return { s: item.symbol, f: item.path, l: item.range };
+}
+
+function shortTraceSurface(surface: {
+  target?: { symbol: string; path: string; range: string };
+  results: Array<{ symbol: string; path: string; range: string }>;
+  warning?: string;
+}): Record<string, unknown> {
+  return {
+    t: surface.target ? shortTraceRelation(surface.target) : undefined,
+    r: surface.results.slice(0, 3).map(shortTraceRelation),
+    w: surface.warning,
+  };
+}
+
+function shortStateRef(ref: { path: string; file: string; range: string; kind: string; symbol?: string }): Record<string, unknown> {
+  return { p: ref.path, f: ref.file, l: ref.range, k: ref.kind, s: ref.symbol };
+}
+
+function shortImpact(report: {
+  target?: { file: string; range?: string; symbol?: string };
+  riskLevel: string;
+  callers: Array<{ symbol: string; path: string; range: string }>;
+  callees: Array<{ symbol: string; path: string; range: string }>;
+  trace: Array<{ symbol: string; path: string; range: string }>;
+  possibleTests: Array<{ file: string }>;
+  warnings: string[];
+}): Record<string, unknown> {
+  return {
+    t: report.target ? { f: report.target.file, l: report.target.range, s: report.target.symbol } : undefined,
+    risk: report.riskLevel,
+    callers: report.callers.slice(0, 3).map(shortTraceRelation),
+    callees: report.callees.slice(0, 3).map(shortTraceRelation),
+    trace: report.trace.slice(0, 3).map(shortTraceRelation),
+    tests: report.possibleTests.slice(0, 3).map(test => test.file),
+    w: report.warnings.slice(0, 3),
+  };
+}
+
+function outputLimit(value: unknown, fallback = 3): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.min(Math.floor(value), 10)
+    : fallback;
+}
+
 export class McpServer {
   private server: Server;
 
@@ -91,9 +137,6 @@ export class McpServer {
             return json(shortResults(results.map(r => ({
               type: r.type, file: r.file, method: r.method,
               class: r.class, loc: r.loc, text: r.text,
-              suggestedNext: r.suggestedNext,
-              suggestedNextReason: r.suggestedNextReason,
-              suggestedNextConfidence: r.suggestedNextConfidence,
             }))));
           }
 
@@ -132,10 +175,6 @@ export class McpServer {
             return text((snippet.warning ? `${snippet.warning}\n` : '') + snippet.content);
           }
 
-          case 'symbol': {
-            return json(await this.container.codeReadService.resolveSymbolTarget(args?.query as string));
-          }
-
           case 'files': {
             return json(this.container.fileDiscoveryService.list(args?.query as string | undefined));
           }
@@ -165,10 +204,10 @@ export class McpServer {
               args?.file as string | undefined,
               args?.symbol as string | undefined,
             );
-            if (args?.id) {
-              return json(list.map(m => ({ id: m.id, text: m.text, ref: m.ref, file: m.file, symbol: m.symbol, scope: m.scope })));
-            }
-            return json(list.map(m => ({ text: m.text, ref: m.ref, file: m.file, symbol: m.symbol, scope: m.scope })));
+            const compactList = list.slice(0, args?.id ? 10 : 3).map(m => args?.id
+              ? { id: m.id, x: m.text, f: m.file, s: m.symbol }
+              : { x: m.text, f: m.file, s: m.symbol });
+            return json(compactList);
           }
 
           case 'refs': {
@@ -176,39 +215,59 @@ export class McpServer {
           }
 
           case 'callers': {
-            return json(await this.container.dependencyService.getCallers(args?.symbol as string));
+            return json(shortTraceSurface(await this.container.dependencyService.getCallers(args?.symbol as string)));
           }
 
           case 'state_refs': {
-            return json(await this.container.dependencyService.getStateReferences(
+            const refs = await this.container.dependencyService.getStateReferences(
               args?.q as string | undefined,
               parseStateReferenceKind(args?.kind),
               args?.n as number | undefined,
-            ));
+            );
+            return json(refs.slice(0, outputLimit(args?.n)).map(shortStateRef));
           }
 
           case 'readers': {
-            return json(await this.container.dependencyService.getStateReaders(args?.q as string, args?.n as number | undefined));
+            const refs = await this.container.dependencyService.getStateReaders(args?.q as string, args?.n as number | undefined);
+            return json(refs.slice(0, outputLimit(args?.n)).map(shortStateRef));
           }
 
           case 'writers': {
-            return json(await this.container.dependencyService.getStateWriters(args?.q as string, args?.n as number | undefined));
+            const refs = await this.container.dependencyService.getStateWriters(args?.q as string, args?.n as number | undefined);
+            return json(refs.slice(0, outputLimit(args?.n)).map(shortStateRef));
           }
 
           case 'callees': {
-            return json(await this.container.dependencyService.getCallees(args?.symbol as string));
+            return json(shortTraceSurface(await this.container.dependencyService.getCallees(args?.symbol as string)));
           }
 
           case 'trace': {
-            return json(await this.container.dependencyService.traceSymbol(args?.symbol as string, args?.d as number | undefined));
+            return json(shortTraceSurface(await this.container.dependencyService.traceSymbol(args?.symbol as string, args?.d as number | undefined)));
           }
 
           case 'impact': {
-            return json(await this.container.impactService.analyze(args?.target as string));
+            return json(shortImpact(await this.container.impactService.analyze(args?.target as string)));
           }
 
           case 'stale': {
-            return json(await this.container.staleService.inspect());
+            const stale = await this.container.staleService.inspect();
+            return json({
+              ok: stale.ok,
+              s: {
+                f: stale.stats.trackedFiles,
+                ch: stale.stats.changedFiles,
+                miss: stale.stats.missingFiles,
+                h: stale.stats.missingHeaders,
+                v: `${stale.stats.vectorCount}/${stale.stats.totalSymbols}`,
+                pi: stale.stats.pendingInsights,
+              },
+              i: stale.issues.slice(0, 3).map(issue => ({
+                sev: issue.severity,
+                k: issue.kind,
+                f: issue.file,
+                s: issue.symbol,
+              })),
+            });
           }
 
           case 'forget': {

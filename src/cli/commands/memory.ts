@@ -17,17 +17,14 @@ export async function rememberCommand(text: string, options: { ref?: string; fil
       : memory.scope === 'file' && memory.file
         ? `file:${memory.file}`
         : 'project';
-    console.log(colors.green(`✓ Saved to memory (${memory.id}) ${colors.dim(`[${scopeLabel}]`)}`));
+    console.log(colors.green(`saved ${memory.id} ${colors.dim(scopeLabel)}`));
 
     // Check for similar existing memories and warn
     try {
       const similar = await container.memoryService.findSimilar(text, 0.5);
       const others = similar.filter(m => m.id !== memory.id);
       if (others.length > 0) {
-        console.log(colors.yellow(`\nNote: ${others.length} similar memor${others.length === 1 ? 'y' : 'ies'} found:`));
-        for (const m of others.slice(0, 3)) {
-          console.log(`  ${colors.dim(m.id)}  ${m.text}${formatMemoryScope(m)}`);
-        }
+        console.log(colors.yellow(`similar=${others.length}`));
       }
     } catch {
       // Non-critical, ignore similarity check failures
@@ -56,8 +53,11 @@ export async function memoriesCommand(options: { search?: string; file?: string;
       return;
     }
 
-    for (const m of memories) {
-      console.log(`  ${colors.cyan(m.id)}  ${colors.dim(formatMemoryTimestamp(m.createdAt))}  ${m.text}${formatMemoryScope(m)}`);
+    for (const m of memories.slice(0, 3)) {
+      console.log(`${colors.cyan(m.id)} ${m.text}${formatMemoryScope(m)}`);
+    }
+    if (memories.length > 3) {
+      console.log(colors.dim(`... ${memories.length - 3} more`));
     }
   } catch (err) {
     console.error(colors.red(`Failed: ${err}`));

@@ -8,18 +8,14 @@ export function printSymbolResolution(resolution: SymbolResolution): void {
   }
 
   console.log(`${colors.bold(resolution.matched.display)} ${colors.dim(`${resolution.matched.file} [${resolution.matched.loc}]`)}`);
-  console.log(colors.dim(`  match: ${resolution.matched.matchType ?? 'fallback'}  confidence: ${resolution.matched.confidence ?? 'low'}`));
 
   if (resolution.candidates.length > 1) {
-    console.log('');
-    console.log(colors.dim('Candidates:'));
-    for (const candidate of resolution.candidates.slice(0, 5)) {
-      console.log(colors.dim(`  ${candidate.display} ${candidate.file} [${candidate.loc}] (${candidate.matchType ?? 'fallback'}, ${candidate.confidence ?? 'low'})`));
+    const candidates = resolution.candidates.slice(1, 3);
+    if (candidates.length > 0) {
+      console.log(colors.dim(`ambiguous: ${resolution.candidates.length} candidates`));
+      for (const candidate of candidates) {
+        console.log(colors.dim(`  ${candidate.display} ${candidate.file} [${candidate.loc}]`));
+      }
     }
-  }
-
-  if (resolution.reason) {
-    console.log('');
-    console.log(colors.dim(resolution.reason));
   }
 }

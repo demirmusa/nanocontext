@@ -17,21 +17,15 @@ export class SearchFormatter {
     }
 
     const lines: string[] = [];
-    if (fallback) {
-      lines.push(`fallback: ${fallback.mode} from ${fallback.from} for "${fallback.originalQuery}" (${fallback.reason})`);
-      lines.push('');
-    }
+    if (fallback) lines.push(`fallback: ${fallback.mode}`);
 
     for (const [file, methods] of grouped) {
       lines.push(file);
       for (const m of methods) {
-        const params = m.sig ? SearchFormatter.extractParams(m.sig) : '';
-        lines.push(`  ${m.method || m.class}(${params})[${m.loc}]`);
-        if (m.related?.length) {
-          lines.push(`    related: ${m.related.map(item => `${item.method || item.class}[${item.loc}]`).join(', ')}`);
-        }
+        const label = m.method || m.class || m.id || 'match';
+        lines.push(`  ${label}[${m.loc}]`);
         if (m.memoryHint) {
-          lines.push(`    memory: ${m.memoryHint}`);
+          lines.push(`    mem: ${m.memoryHint}`);
         }
       }
       lines.push('');
@@ -134,11 +128,6 @@ export class SearchFormatter {
     }
 
     return lines.join('\n');
-  }
-
-  private static extractParams(sig: string): string {
-    const match = sig.match(/\(([^)]*)\)/);
-    return match ? match[1] : '';
   }
 }
 
